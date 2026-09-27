@@ -367,8 +367,9 @@
 | [code/13-taa](code/13-taa/) | 时序抗锯齿：Halton(2,3) 8 点抖动 + ping-pong 历史 + 邻域 AABB clamp + 首帧冷启动，**空格开关对比摩尔纹闪烁**（headless 验证时序收敛差=0），对应 11 章 §TAA 与 18 章 M3 |
 | [code/14-frame-graph](code/14-frame-graph/) | **收官件·迷你帧图**：声明式 pass + Kahn 拓扑排序 + 死 pass 剔除 + RT 内容寻址池化 + 瞬时深度 + backbuffer 钩子，载荷为 HDR bloom 链（验证：编译序正确、第二帧零新建），对应 18 章 M2，**从示例到引擎的一步** |
 | [code/15-skinning](code/15-skinning/) | GPU 骨骼蒙皮：6 骨骼链 FK + 矩阵调色板 + 两骨骼 LBS，行波驱动的挥鞭触手，**空格开关对比**（headless 验证尖端随 t 移位/关蒙皮冻结），对应 08 章——**文档可代码化主题至此全覆盖** |
+| [code/16-compute-sort](code/16-compute-sort/) | **进阶原语·GPU bitonic 排序**：65536 键/帧、105 次 dispatch 零回读、名次渐变可视化（headless 验证单调违例 0/65535），对应 07 章 §6 排序 + 27 章案例 A/D 公共深水区 |
 
-**起步代码链完成（体系闭环）**：阶段 3 验收对（09/10）+ 阶段 4 九项（01~08、12）+ 18 章 M3 两件（11 CSM、13 TAA）+ **M2 帧图骨架（14）+ 蒙皮（15）**。`code/build-all.sh`（`--run` 冒烟）一键构建全部 15 个示例。学习者在 14 的图上继续挂节点（阴影/TAA/IBL/异步 compute）即是在"写自己的引擎"。
+**起步代码链完成（体系闭环）**：阶段 3 验收对（09/10）+ 阶段 4 九项（01~08、12）+ 18 章 M3 两件（11 CSM、13 TAA）+ **M2 帧图骨架（14）+ 蒙皮（15）**。`code/build-all.sh`（`--run` 冒烟）一键构建全部 16 个示例。学习者在 14 的图上继续挂节点（阴影/TAA/IBL/异步 compute）即是在"写自己的引擎"；16 号排序是进阶案例（docs/27）的第一个公共原语。
 
 > macOS 26 适配注记：① Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），各 build.sh 已做 CLT→Xcode 自动回退；② 本机工具链 `MTKMesh` 顶点转换输出全零（03/04/05/07/11 已改过程化球体，排障实录见 11 的 README）；③ 混合属性改名 `*BlendFactor`、`newTextureView` 改 descriptor 形式。
 
