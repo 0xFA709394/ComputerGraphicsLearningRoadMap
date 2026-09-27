@@ -1,5 +1,7 @@
 # 11 · 进阶实时渲染专题
 
+> 参考实现：[code/07-shadow-map](../code/07-shadow-map/)（基础阴影+PCF）· [code/11-csm](../code/11-csm/)（λ 切分+texel snapping 级联）· [code/13-taa](../code/13-taa/)（Halton 抖动+邻域 clamp）· [code/14-frame-graph](../code/14-frame-graph/)（帧图骨架）
+
 > 阶段 5 的知识主体：阴影、全局光照、反射、大规模场景、水/云/地形、粒子，以及神经渲染前沿。配合 GAMES202 +《Real-Time Rendering 4th》精读。
 
 ---

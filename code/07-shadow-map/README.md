@@ -34,3 +34,7 @@
 ## 通往 CSM
 
 把本例 ortho 换成 4 级切分（`docs/11 §1.2`：λ 实用切分 + texel snapping），每级一张 1024 图——即 18 章蓝图 M3 的阴影里程碑。
+
+## macOS 26 适配注记
+
+本机工具链上 `MDLAsset → MTKMesh` 转换出的**顶点位置全为 0**（手写四面体 OBJ 可复现，与 vertexDescriptor 传法无关），球体会静默消失。现改用 `makeSphereBuffers()` 过程化经纬球（布局 pos3f|normal3f|uv2f 与原流程一致，shader 不变）。原 Model I/O 加载流程见 git 历史（工具链修复后可还原）；完整排障过程见 `code/11-csm/README.md` 的踩坑实录。

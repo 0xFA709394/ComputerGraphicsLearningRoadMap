@@ -30,3 +30,7 @@
 2. 灯光数据移入 `array<Light>` 常量缓冲 + 循环上限用 function constant 特化（docs/10 §3.1）
 3. 预热下一步：给环境项换成真 IBL——prefiltered cube + BRDF LUT（docs/03 扩展篇 C 代码直接可抄）
 4. 把 `half` 化本 shader（docs/07 §E 清单），对比 GPU 计数器
+
+## macOS 26 适配注记
+
+本机工具链上 `MDLAsset → MTKMesh` 转换出的**顶点位置全为 0**（手写四面体 OBJ 可复现，与 vertexDescriptor 传法无关），球体会静默消失。现改用 `makeSphereBuffers()` 过程化经纬球（布局 pos3f|normal3f|uv2f 与原流程一致，shader 不变）。原 Model I/O 加载流程见 git 历史（工具链修复后可还原）；完整排障过程见 `code/11-csm/README.md` 的踩坑实录。

@@ -42,12 +42,47 @@ func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>, up: SIMD3<Float>) -> simd_f
 // 列数 = metallic 0→1, 行数 = roughness 0→1（经典 PBR 参数图）
 let COLS = 7, ROWS = 5
 
+
+struct SphereVertex {   // 与 mtlVD 布局一致: pos3f|normal3f|uv2f, stride 32
+    var pos: SIMD3<Float>
+    var normal: SIMD3<Float>
+    var uv: SIMD2<Float>
+}
+/// 过程化经纬球(法线=归一化位置)。
+/// 踩坑实录: macOS 26 工具链上 Model I/O 到 MTKMesh 的转换, 顶点位置全为 0(球体静默消失),
+/// 自建 MTLBuffer 绕开; 布局与原 OBJ 流程完全一致, shader 不变。
+func makeSphereBuffers(device: MTLDevice, radius: Float, lat: Int, lon: Int)
+    -> (verts: MTLBuffer, indices: MTLBuffer, indexCount: Int) {
+    var verts: [SphereVertex] = []
+    for i in 0...lat {
+        let th = Float.pi * Float(i) / Float(lat), st = sin(th), ct = cos(th)
+        for j in 0...lon {
+            let ph = 2 * Float.pi * Float(j) / Float(lon)
+            let n = SIMD3<Float>(st * cos(ph), ct, st * sin(ph))
+            verts.append(SphereVertex(pos: n * radius, normal: n,
+                                      uv: SIMD2(Float(j) / Float(lon), 1 - Float(i) / Float(lat))))
+        }
+    }
+    var idx: [UInt16] = []
+    idx.reserveCapacity(lat * lon * 6)
+    for i in 0..<lat {
+        for j in 0..<lon {
+            let a = i * (lon + 1) + j, b = (i + 1) * (lon + 1) + j, c = b + 1, d = a + 1
+            idx += [UInt16(a), UInt16(b), UInt16(c), UInt16(a), UInt16(c), UInt16(d)]
+        }
+    }
+    let vb = device.makeBuffer(bytes: verts, length: MemoryLayout<SphereVertex>.stride * verts.count)!
+    let ib = device.makeBuffer(bytes: idx, length: MemoryLayout<UInt16>.stride * idx.count)!
+    return (vb, ib, idx.count)
+}
+
 final class Renderer: NSObject, MTKViewDelegate {
     let queue: MTLCommandQueue
     let pipeline: MTLRenderPipelineState
     let depthState: MTLDepthStencilState
-    let mesh: MTKMesh
-    let submesh: MTKSubmesh
+    let sphereVB: MTLBuffer
+    let sphereIB: MTLBuffer
+    let sphereIndexCount: Int
     let instanceBuf: MTLBuffer
     var uniforms: Uniforms
 
@@ -60,22 +95,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         // ---- 网格（同 03/04）----
         let objURL = binDir.appendingPathComponent("assets/sphere.obj")
-        let asset = MDLAsset(url: objURL,
-                             vertexDescriptor: nil,
-                             bufferAllocator: MTKMeshBufferAllocator(device: device))
-        guard let mdlMesh = asset.childObjects(of: MDLMesh.self).first as? MDLMesh else { return nil }
+        // ---- 顶点布局 stride 32: pos3f|normal3f|uv2f ----
         let mtlVD = MTLVertexDescriptor()
         mtlVD.attributes[0].format = .float3; mtlVD.attributes[0].offset = 0;  mtlVD.attributes[0].bufferIndex = 0
         mtlVD.attributes[1].format = .float3; mtlVD.attributes[1].offset = 12; mtlVD.attributes[1].bufferIndex = 0
         mtlVD.attributes[2].format = .float2; mtlVD.attributes[2].offset = 24; mtlVD.attributes[2].bufferIndex = 0
         mtlVD.layouts[0].stride = 32
-        mdlMesh.vertexDescriptor = MTKModelIOVertexDescriptorFromMetal(mtlVD)
-
-        do {
-            let mesh = try MTKMesh(mesh: mdlMesh, device: device)
-            guard let submesh = mesh.submeshes.first else { return nil }
-            self.mesh = mesh; self.submesh = submesh
-        } catch { return nil }
+        // 过程化球体(原 OBJ 加载流程在 macOS 26 上顶点清零, 见 makeSphereBuffers 注释)
+        let (vb, ib, idxCount) = makeSphereBuffers(device: device, radius: 1, lat: 24, lon: 32)
+        sphereVB = vb; sphereIB = ib; sphereIndexCount = idxCount
 
         // ---- 实例数据: 平移 × 均匀缩放 ----
         let s: Float = 0.30
@@ -140,14 +168,14 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
-        enc.setVertexBuffer(mesh.vertexBuffers[0].buffer, offset: 0, index: 0)
+        enc.setVertexBuffer(sphereVB, offset: 0, index: 0)
         enc.setVertexBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
         enc.setVertexBuffer(instanceBuf, offset: 0, index: 2)
         enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
-        enc.drawIndexedPrimitives(type: submesh.primitiveType,
-                                  indexCount: submesh.indexCount,
-                                  indexType: submesh.indexType,
-                                  indexBuffer: submesh.indexBuffer.buffer,
+        enc.drawIndexedPrimitives(type: .triangle,
+                                  indexCount: sphereIndexCount,
+                                  indexType: .uint16,
+                                  indexBuffer: sphereIB,
                                   indexBufferOffset: 0,
                                   instanceCount: ROWS * COLS)
         enc.endEncoding()

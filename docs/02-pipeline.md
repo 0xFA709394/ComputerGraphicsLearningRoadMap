@@ -1,5 +1,7 @@
 # 02 · 渲染管线与光栅化
 
+> 参考实现：[code/01](../code/01-hello-triangle/)~[06](../code/06-offscreen-postfx/)（管线逐环节）· CPU 侧对照 → [code/09-software-rasterizer](../code/09-software-rasterizer/)（透视校正插值/z-buffer 手写版）
+
 > 本章建立 GPU 渲染管线的完整心智模型：数据从顶点缓冲到屏幕像素的每一步。目标：能白板画出管线全景图，并解释每个阶段的输入/输出/硬件行为。
 
 ---

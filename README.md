@@ -108,6 +108,8 @@
 
 验收标准：两张图——软光栅渲染的带阴影模型 + 路径追踪的Cornell Box。
 
+> 参考实现已就位：[code/09-software-rasterizer](code/09-software-rasterizer/)（~400 行 C++，透视校正插值/z-buffer/软阴影全含）与 [code/10-path-tracer](code/10-path-tracer/)（~330 行 C++，Cornell Box + NEE + 多线程）。**先自己写，卡住再看**——对照参考实现复盘比自己闷头三天更有价值。
+
 ### 阶段 4：Metal 实时渲染实战（8~12 周）—— 主战场
 
 目标：独立完成一个 PBR 实时渲染 demo（iOS/macOS 均可），覆盖现代实时渲染管线的核心环节。
@@ -118,14 +120,14 @@
 3. **进阶读物**：《Metal by Tutorials》(Kodeco)。
 
 必须亲手实现的模块（即 demo 的里程碑）：
-- [ ] Hello Triangle：完整管线跑通，理解 Metal 的资源模型与状态模型
-- [ ] 相机系统：FPS/orbit 相机、MVP 传参
-- [ ] 模型加载：`Model I/O` 加载 OBJ/glTF（理解顶点属性布局）
-- [ ] Blinn-Phong → **PBR**：Cook-Torrance BRDF（GGX 分布 + Smith 几何 + Fresnel-Schlick），参考 [Filament 的 PBR 文档](https://google.github.io/filament/Filament.html)（免费、极权威）
-- [ ] IBL：环境贴图预滤波、split-sum 近似、HDR 环境加载
-- [ ] Shadow Mapping：深度 pass + PCF 软阴影
-- [ ] 后处理链：render target 离屏渲染 → bloom → tone mapping（ACES）→ sRGB 输出（理解 display P3，这是你的主场）
-- [ ] Compute Shader：粒子系统 或 图像模糊
+- [ ] Hello Triangle：完整管线跑通，理解 Metal 的资源模型与状态模型 → [code/01](code/01-hello-triangle/)
+- [ ] 相机系统：FPS/orbit 相机、MVP 传参 → [code/02](code/02-mvp-cube/)
+- [ ] 模型加载：OBJ/顶点属性布局（含 macOS 26 MTKMesh 回归绕行）→ [code/03](code/03-obj-viewer/)
+- [ ] Blinn-Phong → **PBR**：Cook-Torrance BRDF（GGX + Smith + Fresnel-Schlick）→ [code/05](code/05-pbr-viewer/)，参考 [Filament 文档](https://google.github.io/filament/Filament.html)
+- [ ] IBL：环境贴图预滤波、split-sum、HDR 环境 → [code/12](code/12-ibl/)
+- [ ] Shadow Mapping：深度 pass + PCF → [code/07](code/07-shadow-map/)；级联 → [code/11](code/11-csm/)
+- [ ] 后处理链：离屏 → bloom → ACES → sRGB → [code/06](code/06-offscreen-postfx/)；TAA → [code/13](code/13-taa/)
+- [ ] Compute Shader：粒子系统 或 图像模糊 → [code/08](code/08-compute-particles/)
 - [ ] 调试与性能：Xcode GPU Debugger（帧捕获、shader 断点）、Instruments 的 Metal System Trace
 
 验收标准：一个可以旋转、有 PBR 材质球、软阴影、bloom 的场景，并且你能解释 draw call 里每一步 GPU 在干什么、用 Instruments 定位一个真实瓶颈。
@@ -339,6 +341,7 @@
 | 23 GAMES101 通关 | [docs/23-games101-labs.md](docs/23-games101-labs.md) | 7 次作业的知识映射/常见 bug/验收标准/六周表 |
 | 24 故障诊断树 | [docs/24-troubleshooting.md](docs/24-troubleshooting.md) | 十大症状排查决策树（按概率分支+章节引用）|
 | 25 信息源雷达 | [docs/25-info-radar.md](docs/25-info-radar.md) | ≤10 信源极简订阅策略+例行动作+质量判据 |
+| 26 训练执行计划 | [docs/26-training-plan.md](docs/26-training-plan.md) | 26 周周表：文档×示例×验收物对齐+三条铁律 |
 
 **扩写进度**：25 章 + 附录全部完成，全书约 18 万字，至此收官。学习顺序：README 主线 → 16 章动手 → 20 章每日复习 → 18 章毕业项目 → 13/19/21 面试冲刺 → 24/25 长期工具。
 
@@ -355,5 +358,17 @@
 | [code/05-pbr-viewer](code/05-pbr-viewer/) | 35 球 metallic×roughness 实例矩阵 + GGX 三点光 + ACES（已验证运行），对应 16 章 Step 5 收官 |
 | [code/06-offscreen-postfx](code/06-offscreen-postfx/) | 手工 RenderPass 五链：HDR 场景→亮部→分离高斯 bloom→ACES 合成（已验证运行），对应 02 章 pass 组织与 09 章后处理 |
 | [code/07-shadow-map](code/07-shadow-map/) | 光源深度 pass（depth-only PSO）+ 斜率偏置 + 3×3 PCF（已验证运行，含 stage_in 踩坑实录），对应 11 章阴影基础 |
+| [code/08-compute-particles](code/08-compute-particles/) | compute kernel 驱动 26 万粒子（软化引力 + 半隐式欧拉 + 帧率无关阻尼）+ 点精灵 additive 渲染（已验证运行，含 storageModePrivate 驱动崩溃实录），对应 07 章 §6/扩展 C 与 02 章 encoder 顺序 |
+| [code/09-software-rasterizer](code/09-software-rasterizer/) | **C++ 零依赖软光栅器**：重心坐标/透视校正插值/z-buffer/软阴影两遍结构，输出 TGA（headless 验证：57% 像素、棋盘透视正确），对应 docs/02 的 CPU 落地，阶段 3 验收件之一 |
+| [code/10-path-tracer](code/10-path-tracer/) | **C++ 零依赖路径追踪器**：Cornell Box（NEE 直接光采样 + 余弦间接 + Schlick 玻璃），多线程 480×360@128spp ≈ 0.6s（headless 验证：左红右绿、渗色正确），阶段 3 验收第二张图，对应 docs/06 |
+| [code/11-csm](code/11-csm/) | 级联阴影贴图：4 级 λ 切分 + 视锥切片 AABB 拟合 + texel snapping + 逐级 PCF，**空格键切级联调试着色**（仓库首个交互示例；headless 验证 86.8% 覆盖），对应 11 章 §1.2，含五连踩坑实录 |
+| [code/12-ibl](code/12-ibl/) | IBL split-sum 三件套：程序化 HDR 环境 → irradiance 卷积 + GGX 预滤波 + BRDF LUT（初始化一次烤制）+ 25 球 PBR 矩阵（headless 验证 metallic/roughness 梯度正确），对应 03 章 §IBL，**阶段 4 九项里程碑收官** |
+| [code/13-taa](code/13-taa/) | 时序抗锯齿：Halton(2,3) 8 点抖动 + ping-pong 历史 + 邻域 AABB clamp + 首帧冷启动，**空格开关对比摩尔纹闪烁**（headless 验证时序收敛差=0），对应 11 章 §TAA 与 18 章 M3 |
+| [code/14-frame-graph](code/14-frame-graph/) | **收官件·迷你帧图**：声明式 pass + Kahn 拓扑排序 + 死 pass 剔除 + RT 内容寻址池化 + 瞬时深度 + backbuffer 钩子，载荷为 HDR bloom 链（验证：编译序正确、第二帧零新建），对应 18 章 M2，**从示例到引擎的一步** |
+| [code/15-skinning](code/15-skinning/) | GPU 骨骼蒙皮：6 骨骼链 FK + 矩阵调色板 + 两骨骼 LBS，行波驱动的挥鞭触手，**空格开关对比**（headless 验证尖端随 t 移位/关蒙皮冻结），对应 08 章——**文档可代码化主题至此全覆盖** |
 
-**起步代码链完成**（16 章 Day1–Day7 全落地）：三角形 → 立方体/深度 → OBJ/描述符 → 纹理/sRGB/mip → PBR/实例化 → 离屏/后处理 → 阴影。下一步按 18 章蓝图推进 Mini-Engine（frame graph、CSM、TAA）。
+**起步代码链完成（体系闭环）**：阶段 3 验收对（09/10）+ 阶段 4 九项（01~08、12）+ 18 章 M3 两件（11 CSM、13 TAA）+ **M2 帧图骨架（14）+ 蒙皮（15）**。`code/build-all.sh`（`--run` 冒烟）一键构建全部 15 个示例。学习者在 14 的图上继续挂节点（阴影/TAA/IBL/异步 compute）即是在"写自己的引擎"。
+
+> macOS 26 适配注记：① Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），各 build.sh 已做 CLT→Xcode 自动回退；② 本机工具链 `MTKMesh` 顶点转换输出全零（03/04/05/07/11 已改过程化球体，排障实录见 11 的 README）；③ 混合属性改名 `*BlendFactor`、`newTextureView` 改 descriptor 形式。
+
+> 构建环境注：Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），且新 SDK 将混合状态属性改名 `*BlendFactor`；各示例 build.sh 已做 CLT→Xcode 自动回退。

@@ -31,3 +31,7 @@
 2. 把棋盘换成真纹理：`MTKTextureLoader` + `SRGB` 选项 + shader `texture2d` 采样（Step 4）
 3. 加第二个光源与 rim light（17 章 §1）
 4. 用 `mesh.boundingBox` 自动缩放/居中任意模型到视锥内
+
+## macOS 26 适配注记
+
+本机工具链上 `MDLAsset → MTKMesh` 转换出的**顶点位置全为 0**（手写四面体 OBJ 可复现，与 vertexDescriptor 传法无关），球体会静默消失。现改用 `makeSphereBuffers()` 过程化经纬球（布局 pos3f|normal3f|uv2f 与原流程一致，shader 不变）。原 Model I/O 加载流程见 git 历史（工具链修复后可还原）；完整排障过程见 `code/11-csm/README.md` 的踩坑实录。

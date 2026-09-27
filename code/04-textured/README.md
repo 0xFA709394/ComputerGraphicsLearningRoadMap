@@ -26,3 +26,7 @@
 2. 把采样器 `mip_filter::linear` 去掉（即不用三线性）→ mip 级间跳变线出现在球面上
 3. `MTLTexture.write` 自己填一张渐变纹理（无文件创建纹理的路径）
 4. 加 `texture2d<float> albedoTex [[texture(1)]]` 第二张细节纹理，近距离叠加（04 章 §5.4 detail）
+
+## macOS 26 适配注记
+
+本机工具链上 `MDLAsset → MTKMesh` 转换出的**顶点位置全为 0**（手写四面体 OBJ 可复现，与 vertexDescriptor 传法无关），球体会静默消失。现改用 `makeSphereBuffers()` 过程化经纬球（布局 pos3f|normal3f|uv2f 与原流程一致，shader 不变）。原 Model I/O 加载流程见 git 历史（工具链修复后可还原）；完整排障过程见 `code/11-csm/README.md` 的踩坑实录。

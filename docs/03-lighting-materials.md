@@ -1,5 +1,7 @@
 # 03 · 光照与材质（PBR 核心）
 
+> 参考实现：[code/05-pbr-viewer](../code/05-pbr-viewer/)（三点光 GGX 球阵）· [code/12-ibl](../code/12-ibl/)（split-sum 三件套：irradiance/GGX 预滤波/BRDF LUT）
+
 > 本章是实时图形学的心脏。目标：默写渲染方程、吃透 Cook-Torrance 每一项、能徒手写一个直接光 PBR shader。配合阅读：[Filament PBR 文档](https://google.github.io/filament/Filament.html)（免费、工业级权威）。
 
 ---

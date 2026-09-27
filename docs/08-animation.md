@@ -1,5 +1,7 @@
 # 08 · 动画系统
 
+> 参考实现：[code/15-skinning](../code/15-skinning/)（骨骼链 FK + 矩阵调色板 + 两骨骼 LBS，空格开关对比）
+
 > 从关键帧插值到 GPU 蒙皮再到 IK。iOS 开发者优势：ARKit 的 BlendShape 人脸、CADisplayLink 驱动模型、Core Animation 曲线直觉全部可以对接。
 
 ---

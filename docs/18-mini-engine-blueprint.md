@@ -1,5 +1,7 @@
 # 18 · 毕业项目蓝图：Mini-Engine 设计书
 
+> 参考实现已就位：M2 帧图骨架 → [code/14-frame-graph](../code/14-frame-graph/)；M3 阴影/抗锯齿 → [code/11-csm](../code/11-csm/)、[code/13-taa](../code/13-taa/)；动画 → [code/15-skinning](../code/15-skinning/)。把它们的节点挂进 14 的图 = 你的 Mini-Engine。
+
 > 把 17 章知识变成一个可执行工程。这是 12 章作品集 P1/P2 的设计文档：目标范围、架构、模块接口、里程碑验收标准全部落纸。资深工程师做图形项目的正确姿势：**先写设计书，再写代码**。
 
 ---

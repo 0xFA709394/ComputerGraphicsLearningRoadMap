@@ -1,5 +1,7 @@
 # 06 · 光线追踪与离线渲染
 
+> 参考实现：[code/10-path-tracer](../code/10-path-tracer/)（Cornell Box + NEE + 玻璃，C++ 零依赖多线程）
+
 > 从 whitted 到路径追踪到 PBRT。本章让你的理解越过"实时近似"抵达物理正确的源头，反过来理解实时渲染每个 hack 在近似什么。实践主线：《Ray Tracing in One Weekend》三部曲 → PBRT。
 
 ---
