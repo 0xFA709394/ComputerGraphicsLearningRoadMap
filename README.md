@@ -342,6 +342,7 @@
 | 24 故障诊断树 | [docs/24-troubleshooting.md](docs/24-troubleshooting.md) | 十大症状排查决策树（按概率分支+章节引用）|
 | 25 信息源雷达 | [docs/25-info-radar.md](docs/25-info-radar.md) | ≤10 信源极简订阅策略+例行动作+质量判据 |
 | 26 训练执行计划 | [docs/26-training-plan.md](docs/26-training-plan.md) | 26 周周表：文档×示例×验收物对齐+三条铁律 |
+| 27 进阶方向案例 | [docs/27-advanced-cases.md](docs/27-advanced-cases.md) | 第 26 周后四选一：引擎/离线/Apple 专家/3DGS 的完整项目案例（周计划+MVD+面试线） |
 
 **扩写进度**：25 章 + 附录全部完成，全书约 18 万字，至此收官。学习顺序：README 主线 → 16 章动手 → 20 章每日复习 → 18 章毕业项目 → 13/19/21 面试冲刺 → 24/25 长期工具。
 
