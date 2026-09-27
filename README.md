@@ -374,6 +374,8 @@
 | [code/20-drs](code/20-drs/) | **进阶案例 C 骨架**：DRS 动态分辨率——EMA 帧时间反馈 + 滞回分档 + 可注入合成帧时间的控制器单测（降档/升档/抗抖动三断言全过），bilinear 占位可 drop-in MetalFX，对应 07 章 §8.3 |
 | [code/21-sdf-raymarch](code/21-sdf-raymarch/) | **实战清单收官·全片元 SDF**：球体追踪 + 光滑布尔 + SDF 软阴影/AO（零网格），透视棋盘+融合体成像验证，对应 05 章 SDF——**实战项目清单七项全有参考实现** |
 
+**一键复现验证**：`./tools/verify-all.sh`（C++ 产物断言 + 控制器单测 + 全量构建；`tools/README.md` 说明方法论，`pngview.py`/`tga_stats.py` 为无屏验证工具）。
+
 **起步代码链完成（体系闭环）**：阶段 3 验收对（09/10）+ 阶段 4 九项（01~08、12）+ 18 章 M3 两件（11 CSM、13 TAA）+ **M2 帧图骨架（14）+ 蒙皮（15）**。`code/build-all.sh`（`--run` 冒烟）一键构建全部 21 个示例。学习者在 14 的图上继续挂节点（阴影/TAA/IBL/异步 compute）即是在"写自己的引擎"；16 号排序是进阶案例（docs/27）的第一个公共原语。
 
 > macOS 26 适配注记：① Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），各 build.sh 已做 CLT→Xcode 自动回退；② 本机工具链 `MTKMesh` 顶点转换输出全零（03/04/05/07/11 已改过程化球体，排障实录见 11 的 README）；③ 混合属性改名 `*BlendFactor`、`newTextureView` 改 descriptor 形式。
