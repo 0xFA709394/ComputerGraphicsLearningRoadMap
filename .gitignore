@@ -6,3 +6,6 @@ code/10-path-tracer/out.png
 code/*/out.tga
 code/17-3dgs-viewer/scene.ply
 code/18-bvh-pathtracer/out.png
+code/19-gltf-loader/knot.gltf
+code/19-gltf-loader/knot.bin
+code/19-gltf-loader/out.png
