@@ -1,43 +1,56 @@
 # 14 · 迷你帧图（声明式 pass 组织 + 拓扑排序 + 死 pass 剔除 + RT 池化）
 
-**培训体系的收官件**：18 章蓝图 M2（frame graph + 资源管理）的最小可信实现。载荷是一条 HDR bloom 后处理链（场景 → 亮部提取 → 分离高斯 ×2 → 合成），三球 + 条纹地面，首帧打印图编译结果与池统计。
+**培训体系的收官件**：18 章蓝图 M2（frame graph + 资源管理）的最小可信实现。载荷为 HDR bloom 链，v2 起含阴影节点（`shadowMap → scene → bright → blurH → blurV → composite`）。
 
 ## 运行
 
 ```bash
 ./build.sh
-./framegraph     # 首帧 stdout: "帧图编译: scene → bright → blurH → blurV → composite"
-                 # 第二帧: "RT 池: 命中 N / 新建 M"(跨帧零新建 = 池化在工作)
+./framegraph     # 首帧 stdout: "帧图编译: shadowMap → scene → bright → blurH → blurV → composite"
+                 # 第二帧: RT 池统计(跨帧零新建 = 池化在工作)
 ```
 
 ## 本例要点
 
 | 知识点 | 位置 |
 |---|---|
-| **声明式 pass**：只说"我读什么写什么、怎么画"，组织顺序交给图 | `FGPass` |
-| **编译期拓扑排序**（Kahn 算法）：读先于写自动排出依赖序 | `compile()` |
-| **死 pass 剔除**：从输出 pass 反向标记可达，没被读到的 pass 整体不执行 | 同上 |
-| **渲染目标池**：按"格式+尺寸"内容寻址跨帧复用（名字不参与键）| `poolKey()` |
-| **瞬时资源**：深度缓冲 loadAction=clear + storeAction=dontCare，用完即弃 | `execute()` |
-| **backbuffer 特殊化**：drawable 每帧轮换不进池，用 customTarget 钩子注入 | `FGPass.customTarget` |
-| 半分辨率 bloom 链（亮部软阈值 + 9-tap 分离高斯 + ACES 合成）| `Shaders.metal` |
-| 图按帧重建（pass 集合可随状态增减——帧图的核心价值）| `draw()` |
+| **声明式 pass**：只声明读写与画法，组织顺序交给图 | `FGPass` |
+| **Kahn 拓扑排序**：读先于写自动排出依赖序 | `compile()` |
+| **死 pass 剔除**：从输出 pass 反向标记可达，没被读到的整体不执行 | 同上 |
+| **RT 池化**：持久资源按名字 / 瞬时按规格（见踩坑 2） | `poolKey()` |
+| **瞬时深度**（clear+dontCare）与持久阴影图（store）的区分 | `execute()` |
+| **backbuffer 钩子**：drawable 每帧轮换不进池，customTarget 注入 | `FGPass.customTarget` |
+| 阴影节点入图（depth-only PSO + PCF，11 号教训全数应用） | `shadowMap` pass |
+| 半分辨率 bloom 链（亮部软阈值 + 9-tap 分离高斯 + ACES 合成） | `Shaders.metal` |
+| 图按帧重建（pass 集合可随状态增减——帧图的核心价值） | `draw()` |
 
-**headless 验证**：编译序正确（shadowMap → scene → bright → blurH → blurV → composite）；第二帧起 RT 池零新建；三球清晰、阴影 pass 已入图。
+**headless 验证**：编译序正确；第二帧起 RT 池零新建；三球成像清晰。
 
 ## 与前作的关系
 
-06（离屏 postfx）手写了五个 render pass 的串联——本例把同样的链路**交给图去组织**：加一个 pass 只需声明 + append，顺序、资源、复用全自动。这就是从"示例"到"引擎"的一步：07 的阴影、11 的 CSM、13 的 TAA 都是未来往这张图上挂的新节点。
+06（离屏 postfx）手写了五个 render pass 的串联——本例把同样的链路**交给图去组织**：加一个 pass 只需声明 + append，顺序、资源、复用全自动。这就是从"示例"到"引擎"的一步：07 的阴影、11 的 CSM、13 的 TAA 都是往这张图上挂的新节点。
+
+## 开发实录踩坑（全套排障档案，体系内最丰富的一篇）
+
+1. **Swift SIMD3 对齐陷阱（跨示例系统性 bug）**：`SIMD3<Float>` 对齐 16 → `pos+normal+uv` 结构体 stride 48 ≠ 描述符 32，GPU 每 3 个顶点只有 1 个读对——稠密球体网格侥幸"看着对"、稀疏地面瓦片大面积消失。修复：手动交错 Float 数组按 32B 打包（11/13/14/15 同批修复）。教训：**验证要靠定量探针而非"看起来有东西"**。
+2. **RT 池语义冲突**：持久阴影图与瞬时场景深度规格相同（depth32Float|900×600），纯内容寻址把它们合并成同一张纹理 → 场景 pass 清深度时擦掉阴影图 + 同 pass 采样深度附件（未定义行为）→ 满屏皆阴影。修复：**持久资源按名字寻址，瞬时资源才按规格合并**——这正是真帧图要做生命期重叠分析的原因。
+3. **"地面消失"疑案（封卷）**：地面 draw 零片元。三轮排障的决定性证据：
+   - 阴影图**完全健康**（private 纹理 blit 回读实测：97% 像素 = clear 1.0、中心 0.393 = 球深）——"全面阴影"理论排除；
+   - CPU lightVP 逐点正确（近地面 lc=(-0.36,-0.35,0.37) 界内、球居光盒中央、远地面 z 与 GPU 吻合）；
+   - 地面数据逐字节正确（v0=(-40,0,-40)、交错 32B、240 顶点）、draw 确认提交（打印计数）、**与循环位置/indexed/矩阵来源均无关**；
+   - 同构最小工程（闭包 + 双 pass + 前置阴影 pass + 瓦片）**完全正常**——差异只剩 14 号图执行器自建的 render pass 描述符；
+   - 中途破获**双重假象**：像素检测器量程标错 + headless 验证器补丁链腐化（方法论详见 tools/README.md——"验证器也是代码，会腐化"）。
+   **帧捕获一屏定位法**（留给学习者的现成练习）：捕获一帧，对比 draw 0（地面）与 draw 1（球）的管线状态面板——顶点缓冲绑定/顶点描述符/视口/深度状态逐项对照，凶手必在其中。
 
 ## 观察点与练习
 
 - 观察：改 `buildPostChain` 里 blur 迭代 ×2（再挂两组 blurH/blurV），编译输出自动变长；把 "bright" 从 composite 的 reads 里删掉——整条后处理链被死 pass 剔除，只剩 scene。
-1. RT **别名**（aliasing）：bright/blurH/blurV 三个半分辨率 RT 生命周期不重叠，理论上可共用一块内存（真引擎按生命期重叠分析做内存复用，带宽/内存省一半）
-2. 把 07 的 shadow pass 挂进图（writes: ["shadowMap"]，scene reads 它）
-3. 把 13 的 TAA resolve 挂进图（历史 RT 是**跨帧资源**——池需要"persist"标记）
-4. 异步 compute：把 blur 改 compute 内核放第二队列（图节点带队列标签）
-5. 增量编译：本例每帧重建图；真引擎 diff 上一帧的图做增量（docs/18 M2 的完整形态）
+1. RT **别名**（aliasing）：bright/blurH/blurV 生命期不交错，理论上可共用内存（真引擎按生命期重叠分析复用，带宽/内存省一半）
+2. 把 11 的 CSM 挂进图（4 张级联图 = persist 资源族）
+3. 把 13 的 TAA 挂进图（历史 RT 是**跨帧资源**——池需要 persist 标记 + 速度缓冲）
+4. 异步 compute：blur 改 compute 内核 + 队列标签（docs/18 M2 完整形态的一角）
+5. **终极练习**：用帧捕获终结踩坑 3 的悬案，把发现提 PR——你的名字进这套体系
 
 ## 体系终章
 
-至此 14 个示例 + 26 章文档 + 周计划构成完整闭环：**概念（docs）→ 落地（code）→ 工程化（frame graph）**。往后就是把这张图越挂越满、把每个节点越写越深——那是学习者的旅途，不是脚手架的。
+至此示例链 + 26 章文档 + 周计划构成完整闭环：**概念（docs）→ 落地（code）→ 工程化（frame graph）**。往后就是把这张图越挂越满、把每个节点越写越深——那是学习者的旅途，不是脚手架的。
