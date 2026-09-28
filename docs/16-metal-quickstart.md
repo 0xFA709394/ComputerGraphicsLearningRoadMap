@@ -196,5 +196,8 @@ Day6-7 接 03 章 GGX 直接光       验收: 白炉测试跑通
 | **shader 读到垃圾矩阵** | Uniforms 里放了 Swift Array(引用类型), setBytes 只拷 8 字节指针 → 平铺字段 | 11 |
 | **片元读 obj/material 恒为零(字面黑)** | 只 setVertexBytes 没调 setFragmentBytes——**顶点/片元缓冲是两个独立名字空间** | 14 |
 | **像素探针结论全错** | 纹理/RT 行序与屏幕坐标上下翻转(Metal NDC y 约定)→ 探针先验朝向 | 14 |
+| **新增结构体字段后渲染全乱** | 手写缓冲字节数没跟 MemoryLayout.stride 走(SIMD 对齐使实际 stride > 直觉) | 17 |
+| **billboard/splat 偏移看不见** | NDC 偏移加在透视除法前(clip 空间), 被 w 缩成亚像素 → 先除 w 再偏移 | 17 |
+| **kernel 参数读垃圾(越界寻址)** | MSL 侧加了 buffer 参数但 draw() 忘了 setBytes——"在验证器里试过"≠"已入库" | 17 |
 | **metal 找不到** | CLT 无 Metal 工具链; Xcode 26 起为独立下载组件 | 各 build.sh |
 | **混合属性编译错** | 新 SDK 改名 sourceRGBBlendFunction → *BlendFactor | 08 |
