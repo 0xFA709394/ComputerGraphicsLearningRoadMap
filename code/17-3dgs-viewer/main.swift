@@ -10,8 +10,10 @@ import simd
 let N_SPLATS = 32_768    // 2^15: bitonic 要求 2 的幂(圆环 24k + 地面 8k + 尾巴 768)
 
 struct Splat {
-    var posScale: SIMD4<Float>     // xyz + 世界尺度
-    var colorAlpha: SIMD4<Float>   // rgb + alpha(未 sigmoid 前的可见值)
+    var pos: SIMD4<Float>          // xyz + 平均尺度(渲染兜底)
+    var colorAlpha: SIMD4<Float>   // rgb + alpha
+    var scale: SIMD3<Float>        // 各向异性半轴(EWA: 3D 协方差 = R S Sᵀ Rᵀ)
+    var rot: SIMD4<Float>          // 单位四元数 (w,x,y,z)
 }
 struct Uniforms {
     var viewProj: simd_float4x4
@@ -57,22 +59,30 @@ func makeScene() -> [Splat] {
         let col = SIMD3<Float>(0.5 + 0.5 * cos(2 * .pi * hue),
                                0.5 + 0.5 * cos(2 * .pi * (hue + 0.33)),
                                0.5 + 0.5 * cos(2 * .pi * (hue + 0.66)))
-        s.append(Splat(posScale: SIMD4(cx, cy, cz, 0.035 + rnd() * 0.03),
-                       colorAlpha: SIMD4(col.x, col.y, col.z, 0.75)))
+        // EWA: 沿环面切向拉长的椭球——真实 3DGS 重建出的就是这种"贴表面"形态
+        let qw = cos(u / 2), qx = sin(u / 2)   // 绕 y 轴旋转对齐切向
+        s.append(Splat(pos: SIMD4(cx, cy, cz, 0),
+                       colorAlpha: SIMD4(col.x, col.y, col.z, 0.75),
+                       scale: SIMD3(0.09 + rnd() * 0.05, 0.02 + rnd() * 0.01, 0.03 + rnd() * 0.02),
+                       rot: SIMD4(qw, 0, qx, 0)))
     }
     // 地面 8k
     for _ in 0..<8192 {
         let a = rnd() * 2 * .pi, rad = 0.2 + rnd() * 3.2
         let g: Float = 0.25 + rnd() * 0.25
-        s.append(Splat(posScale: SIMD4(cos(a) * rad, -1.35, sin(a) * rad, 0.05 + rnd() * 0.04),
-                       colorAlpha: SIMD4(g * 0.8, g, g * 1.25, 0.6)))
+        s.append(Splat(pos: SIMD4(cos(a) * rad, -1.35, sin(a) * rad, 0),
+                       colorAlpha: SIMD4(g * 0.8, g, g * 1.25, 0.6),
+                       scale: SIMD3(0.10 + rnd() * 0.05, 0.015, 0.10 + rnd() * 0.05),
+                       rot: SIMD4(1, 0, 0, 0)))
     }
     // 螺旋尾巴(凑满 2 的幂)
     for i in 0..<(N_SPLATS - s.count) {
         let t = Float(i) / Float(N_SPLATS - s.count)
         let a = t * 6 * .pi
-        s.append(Splat(posScale: SIMD4(cos(a) * (0.3 + t), -1.2 + t * 2.6, sin(a) * (0.3 + t), 0.05),
-                       colorAlpha: SIMD4(0.95, 0.55 + 0.4 * t, 0.2, 0.8)))
+        s.append(Splat(pos: SIMD4(cos(a) * (0.3 + t), -1.2 + t * 2.6, sin(a) * (0.3 + t), 0),
+                       colorAlpha: SIMD4(0.95, 0.55 + 0.4 * t, 0.2, 0.8),
+                       scale: SIMD3(0.08, 0.08, 0.03),
+                       rot: SIMD4(1, 0, 0, 0)))
     }
     return s
 }
@@ -112,12 +122,12 @@ func writePLY(_ splats: [Splat], to path: String) throws {
         let inv: Float = 1 / 0.2820948
         let logit = { (a: Float) in log(max(a, 0.02) / max(1 - a, 0.02)) }
         let fields: [Float] = [
-            s.posScale.x, s.posScale.y, s.posScale.z,
+            s.pos.x, s.pos.y, s.pos.z,
             0, 0, 0,
             (fd.x - 0.5) * inv, (fd.y - 0.5) * inv, (fd.z - 0.5) * inv,
             logit(s.colorAlpha.w),
-            s.posScale.w, s.posScale.w, s.posScale.w,      // 各向同性简化
-            1, 0, 0, 0,
+            s.scale.x, s.scale.y, s.scale.z,               // 真各向异性 scale(线性空间)
+            s.rot.w, s.rot.x, s.rot.y, s.rot.z,            // (w,x,y,z)
         ]
         for f in fields {
             var v = f.bitPattern.littleEndian
@@ -145,9 +155,11 @@ func readPLY(from path: String) throws -> [Splat] {
             let c: Float = 0.2820948
             let sig = { (o: Float) in 1 / (1 + exp(-o)) }
             out.append(Splat(
-                posScale: SIMD4(floats[0], floats[1], floats[2], floats[11]),
+                pos: SIMD4(floats[0], floats[1], floats[2], 0),
                 colorAlpha: SIMD4(0.5 + c * floats[6], 0.5 + c * floats[7], 0.5 + c * floats[8],
-                                  sig(floats[9]))))
+                                  sig(floats[9])),
+                scale: SIMD3(floats[11], floats[12], floats[13]),
+                rot: SIMD4(floats[17], floats[14], floats[15], floats[16])))
         }
     }
     return out
@@ -177,12 +189,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             try writePLY(scene, to: plyPath)
             let loaded = try readPLY(from: plyPath)
             print("ply 往返: 写 \(scene.count) / 读 \(loaded.count) splats (\(plyPath))")
-            splatBuf = device.makeBuffer(bytes: loaded, length: N_SPLATS * 32, options: .storageModeShared)!
+            splatBuf = device.makeBuffer(bytes: loaded, length: N_SPLATS * MemoryLayout<Splat>.stride, options: .storageModeShared)!
         } catch {
             FileHandle.standardError.write("ply 往返失败: \(error)\n".data(using: .utf8)!)
             return nil
         }
-        sortedBuf = device.makeBuffer(length: N_SPLATS * 32, options: .storageModeShared)!
+        sortedBuf = device.makeBuffer(length: N_SPLATS * MemoryLayout<Splat>.stride, options: .storageModeShared)!
         keyBuf = device.makeBuffer(length: N_SPLATS * 8, options: .storageModeShared)!
 
         let binDir = URL(fileURLWithPath: CommandLine.arguments[0])
@@ -251,6 +263,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setBuffer(splatBuf, offset: 0, index: 0)
             enc.setBuffer(keyBuf, offset: 0, index: 1)
             enc.setBuffer(sortedBuf, offset: 0, index: 2)
+            var nTotal = UInt32(N_SPLATS)
+            enc.setBytes(&nTotal, length: 4, index: 3)   // 修复: gather 的 nTotal 此前从未传入(越界→全屏同一 splat)
             enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
             enc.endEncoding()
         }

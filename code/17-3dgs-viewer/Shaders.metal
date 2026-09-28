@@ -6,8 +6,10 @@
 using namespace metal;
 
 struct Splat {
-    float4 posScale;     // xyz + 世界尺度
-    float4 colorAlpha;   // rgb(SH DC 已解码) + alpha
+    float4 pos;          // xyz
+    float4 colorAlpha;   // rgb + alpha
+    float4 pad0;         // scale.xyz + pad(EWA 用)
+    float4 pad1;         // quaternion (w,x,y,z)
 };
 
 // ---- Pass 1: 每帧生成排序键(ulong: 32bit 单调键 << 32 | 原 index) ----
@@ -15,7 +17,7 @@ kernel void makeKeys(device const Splat *splats [[buffer(0)]],
                      device ulong *keys [[buffer(1)]],
                      constant float3 &camPos [[buffer(2)]],
                      uint gid [[thread_position_in_grid]]) {
-    float3 p = splats[gid].posScale.xyz;
+    float3 p = splats[gid].pos.xyz;
     float d = length(p - camPos);                       // 距离键
     uint k = as_type<uint>(d);                          // IEEE754 单调映射(正数保序)
     keys[gid] = (ulong(k) << 32) | ulong(gid);
@@ -63,16 +65,48 @@ vertex VOut splatVert(uint vid [[vertex_id]],
                       device const Splat *sorted [[buffer(0)]],
                       constant Uniforms &u [[buffer(1)]]) {
     Splat s = sorted[iid];
-    float4 clip = u.viewProj * float4(s.posScale.xyz, 1);
+    float4 clip = u.viewProj * float4(s.pos.xyz, 1);
     VOut o;
     o.pos = clip;
-    // 屏幕空间半径 ≈ 世界尺度 × 投影缩放/w(docs/22 简化: 真版是 3D 协方差→2D 投影, 见 README 练习)
-    float rPx = clamp(s.posScale.w / max(clip.w, 0.3) * u.misc.w * 0.35, 2.0, 60.0);
+    // ---- EWA splatting 核心(docs/27 案例 D 练习 1 的落地) ----
+    // 1) 3D 协方差 Σ = R·S·Sᵀ·Rᵀ (S = scale 对角)
+    float qw = s.pad1.x, qx = s.pad1.y, qy = s.pad1.z, qz = s.pad1.w;
+    // 四元数 → 旋转矩阵(列)
+    float3 r0 = float3(1-2*(qy*qy+qz*qz), 2*(qx*qy+qw*qz), 2*(qx*qz-qw*qy));
+    float3 r1 = float3(2*(qx*qy-qw*qz), 1-2*(qx*qx+qz*qz), 2*(qy*qz+qw*qx));
+    float3 r2 = float3(2*(qx*qz+qw*qy), 2*(qy*qz-qw*qx), 1-2*(qx*qx+qy*qy));
+    float3 sc = s.pad0.xyz;
+    // M = R·S 的三列
+    float3 m0 = r0 * sc.x, m1 = r1 * sc.y, m2 = r2 * sc.z;
+    // Σ = M·Mᵀ (对称)
+    float sxx = dot(m0,m0), sxy = dot(m0,m1), sxz = dot(m0,m2);
+    float syy = dot(m1,m1), syz = dot(m1,m2), szz = dot(m2,m2);
+    // 2) 投影雅可比 J(视空间→NDC, 小角近似: 只取 x/y 缩放与透视除数)
+    float3 pv = s.pos.xyz - u.camPos.xyz;
+    float z = max(dot(pv, normalize(float3(-u.camPos.x, -u.camPos.y, -u.camPos.z))), 0.2);
+    float f = u.misc.w * 0.5;                       // 焦距(像素)
+    float jx = f / z, jy = f / z;
+    // 3) 2D 协方差 C = J·W·Σ·Wᵀ·Jᵀ (W=视变换, 简化为恒等+深度缩放)
+    float cxx = jx*jx*sxx, cxy = jx*jy*sxy, cyy = jy*jy*syy;
+    cxx += 0.3; cyy += 0.3;                         // 低通核(docs/22 §EWA)
+    // 4) 特征分解 → 椭圆半轴与角度
+    float tr = cxx + cyy, det = cxx*cyy - cxy*cxy;
+    float disc = sqrt(max(tr*tr/4 - det, 0.0));
+    float l1 = tr/2 + disc, l2 = max(tr/2 - disc, 0.1);
+    float ang = atan2(2*cxy, cxx - cyy) * 0.5;      // 主轴方向
+    float aPx = clamp(sqrt(l1), 1.5, 80.0);
+    float bPx = clamp(sqrt(l2), 1.0, 80.0);
+    // 5) 四角按椭圆旋转/缩放
+    float ca = cos(ang), sa = sin(ang);
     float2 c[4] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,1) };
-    o.corner = c[vid];
-    o.pos.xy += c[vid] * rPx / float2(u.misc.w * 1.5, u.misc.w);   // NDC 偏移(近似方形视口)
+    float2 e = c[vid];
+    float2 local = float2(e.x * aPx * ca - e.y * bPx * sa, e.x * aPx * sa + e.y * bPx * ca);
+    // NDC 偏移必须在透视除法之后加(先除 w 再偏移, 否则偏移被 w 缩成亚像素——踩坑实录)
+    float2 ndc = clip.xy / clip.w;
+    o.pos = float4(ndc + local / float2(u.misc.w * 1.5, u.misc.w), clip.z / clip.w, 1.0);
+    o.corner = e;
     o.colorAlpha = s.colorAlpha;
-    o.radiusPx = rPx;
+    o.radiusPx = aPx;
     return o;
 }
 fragment float4 splatFrag(VOut in [[stage_in]]) {
