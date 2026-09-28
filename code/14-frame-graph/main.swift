@@ -413,11 +413,13 @@ final class Renderer: NSObject, MTKViewDelegate {
                 if isSphere {
                     enc.setVertexBuffer(self.sphereVB, offset: 0, index: 0)
                     enc.setVertexBytes(&o, length: MemoryLayout<ObjUniforms>.stride, index: 2)
+                    enc.setFragmentBytes(&o, length: MemoryLayout<ObjUniforms>.stride, index: 2)
                     enc.drawIndexedPrimitives(type: .triangle, indexCount: self.sphereIndexCount,
                                               indexType: .uint16, indexBuffer: self.sphereIB, indexBufferOffset: 0)
                 } else {
                     enc.setVertexBuffer(self.groundVB, offset: 0, index: 0)
                     enc.setVertexBytes(&o, length: MemoryLayout<ObjUniforms>.stride, index: 2)
+                    enc.setFragmentBytes(&o, length: MemoryLayout<ObjUniforms>.stride, index: 2)   // 终局修复: 片元读 obj.color 需片元阶段绑定!
                     enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: self.groundVertexCount)
                 }
             }
