@@ -93,11 +93,17 @@ final class FrameGraph {
                  width: Int, height: Int) -> [String: MTLTexture] {
         guard let cb = cmdQueue.makeCommandBuffer() else { return [:] }
         var rts: [String: MTLTexture] = [:]
+        // 踩坑实录(池 bug #3): 瞬时资源纯按规格合并时, 链式 pass(bright→blurH→blurV)
+        // 会读写同一张纹理 = hazard(驱动行为未定义, 实测 scene 被字面黑覆盖)。
+        // 修复: 每规格两个槽位按本帧写入序乒乓——链式 A(写0)→B(读0写1)→C(读1写0) 恰好安全。
+        var slotCounter: [String: Int] = [:]
         for p in order {
             for w in p.writes where p.customTarget == nil {
                 let d = rtDescs[w]!
                 let tw = max(8, Int(Float(width) * d.scale)), th = max(8, Int(Float(height) * d.scale))
-                let key = poolKey(desc: d, w: tw, h: th)
+                let baseKey = poolKey(desc: d, w: tw, h: th)
+                let key = d.store ? baseKey : baseKey + "#\(slotCounter[baseKey, default: 0] % 2)"
+                if !d.store { slotCounter[baseKey, default: 0] += 1 }
                 var tex = pool[key]
                 if tex == nil {
                     let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: d.format,
