@@ -199,5 +199,7 @@ Day6-7 接 03 章 GGX 直接光       验收: 白炉测试跑通
 | **新增结构体字段后渲染全乱** | 手写缓冲字节数没跟 MemoryLayout.stride 走(SIMD 对齐使实际 stride > 直觉) | 17 |
 | **billboard/splat 偏移看不见** | NDC 偏移加在透视除法前(clip 空间), 被 w 缩成亚像素 → 先除 w 再偏移 | 17 |
 | **kernel 参数读垃圾(越界寻址)** | MSL 侧加了 buffer 参数但 draw() 忘了 setBytes——"在验证器里试过"≠"已入库" | 17 |
+| **thread_position_in_threadgroup 未定义** | 它是参数属性 `[[...]]` 不是函数——须作为 kernel 参数传入 | 16 |
+| **waitUntilCompleted 永久死等** | 忘了 cb.commit()——commit/wait 成对出现 | 16 |
 | **metal 找不到** | CLT 无 Metal 工具链; Xcode 26 起为独立下载组件 | 各 build.sh |
 | **混合属性编译错** | 新 SDK 改名 sourceRGBBlendFunction → *BlendFactor | 08 |
