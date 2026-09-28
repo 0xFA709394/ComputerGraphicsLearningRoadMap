@@ -106,7 +106,8 @@ struct Bvh {
     std::vector<uint32_t> indices;       // 三角形重排索引
 
     void build(std::vector<Triangle>& tris) {
-        nodes.assign(2 * tris.size(), {});
+        if (tris.empty()) { std::printf("BVH: 空网格!\n"); std::exit(2); }
+        nodes.assign(2 * tris.size() + 2, {});
         indices.resize(tris.size());
         for (uint32_t i = 0; i < tris.size(); i++) indices[i] = i;
         nodes[0].leftFirst = 0; nodes[0].count = uint32_t(tris.size());
@@ -284,6 +285,109 @@ struct Camera {
     Ray ray(float sx, float sy) const { return {o, norm(ll + hor*sx + ver*sy - o)}; }
 };
 
+// ---------- glTF 2.0 最小读回器(与 19 号 writer 互通; 单 mesh + POSITION/NORMAL + u16 索引) ----------
+// 教学实现: 手写 JSON 字段定位(非通用解析器); 生产用 cgltf/tinygltf。
+struct GltfMesh { std::vector<Vec3> pos, nrm; std::vector<uint32_t> idx; };
+
+static std::string readFileStr(const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+static std::vector<float> readBinFloats(const std::string& binPath, size_t off, size_t count) {
+    std::ifstream f(binPath, std::ios::binary);
+    f.seekg(off);
+    std::vector<float> out(count);
+    f.read((char*)out.data(), count * 4);
+    return out;
+}
+// 在 JSON 文本里找 "key":value 的数值(教学级: 假设无嵌套同名)
+static bool jsonFindNumber(const std::string& js, const std::string& key, double& out) {
+    std::string pat = "\"" + key + "\":";
+    auto p = js.find(pat);
+    if (p == std::string::npos) return false;
+    out = std::atof(js.c_str() + p + pat.size());
+    return true;
+}
+static bool jsonFindArrayN(const std::string& js, const std::string& key, double* out, int n) {
+    std::string pat = "\"" + key + "\":";
+    auto p = js.find(pat);
+    if (p == std::string::npos) return false;
+    p += pat.size();
+    while (p < js.size() && js[p] != '[') p++;
+    for (int i = 0; i < n; i++) out[i] = std::atof(js.c_str() + ++p), p += std::strcspn(js.c_str() + p, ",]");
+    return true;
+}
+
+static GltfMesh loadGltf(const std::string& stem) {
+    std::string js = readFileStr(stem + ".gltf");
+    GltfMesh m;
+    // buffer byteLength / 三个 accessor 的 bufferView byteOffset + count
+    // 约定: view0=indices(u16), view1=positions, view2=normals(与 19 号 writer 的段序一致)
+    auto findViewOffset = [&](int view) -> size_t {
+        // 数第 view+1 个 "byteOffset": 的出现位置(每次 find 从上一命中+1 起)
+        std::string pat = "\"byteOffset\":";
+        size_t p = 0;
+        for (int i = 0; i <= view; i++) {
+            p = js.find(pat, p);
+            if (p == std::string::npos) return 0;
+            if (i < view) p += pat.size();      // 命中后再找下一个; 最后一次停在命中处
+        }
+        return (size_t)std::atoll(js.c_str() + p + pat.size());
+    };
+    // accessor count: indices 是 accessors[0]
+    double idxCount = 0, posCount = 0;
+    {
+        // accessors 数组里逐个 "count"(sortedKeys 下 accessor 对象内字段序不定, 数出现次数)
+        size_t accPos = js.find("\"accessors\"");
+        auto nthCount = [&](int n) -> double {
+            size_t p = accPos;
+            size_t hit = std::string::npos;
+            for (int i = 0; i <= n; i++) {
+                p = js.find("\"count\":", p);
+                if (p == std::string::npos) return 0;
+                hit = p;
+                p += 1;                     // 前进 1(而非 7): 下次 find 从命中的 c 之后找, 不漏
+            }
+            return std::atof(js.c_str() + hit + 8);   // "count": 是 8 字符(含引号与冒号)
+        };
+        idxCount = nthCount(0);
+        posCount = nthCount(1);
+    }
+    size_t idxOff = findViewOffset(0), posOff = findViewOffset(1), nrmOff = findViewOffset(2);
+    // u16 索引
+    {
+        std::ifstream f(stem + ".bin", std::ios::binary);
+        f.seekg(idxOff);
+        std::vector<uint16_t> tmp(idxCount);
+        f.read((char*)tmp.data(), idxCount * 2);
+        m.idx.assign(tmp.begin(), tmp.end());
+    }
+    auto pos = readBinFloats(stem + ".bin", posOff, posCount * 3);
+    auto nrm = readBinFloats(stem + ".bin", nrmOff, posCount * 3);
+    m.pos.resize(posCount);
+    m.nrm.resize(posCount);
+    for (size_t i = 0; i < posCount; i++) {
+        m.pos[i] = {pos[i*3], pos[i*3+1], pos[i*3+2]};
+        m.nrm[i] = {nrm[i*3], nrm[i*3+1], nrm[i*3+2]};
+    }
+    std::printf("loadGltf: idx=%zu pos=%zu\n", m.idx.size(), m.pos.size());
+    return m;
+}
+static std::vector<Triangle> gltfToTriangles(const GltfMesh& g, const Material* m,
+                                             float scale, Vec3 center) {
+    std::vector<Triangle> tris;
+    tris.reserve(g.idx.size() / 3);
+    for (size_t i = 0; i + 2 < g.idx.size(); i += 3) {
+        Vec3 a = g.pos[g.idx[i]] * scale + center;
+        Vec3 b = g.pos[g.idx[i+1]] * scale + center;
+        Vec3 c = g.pos[g.idx[i+2]] * scale + center;
+        Vec3 n = norm(g.nrm[g.idx[i]] + g.nrm[g.idx[i+1]] + g.nrm[g.idx[i+2]]);
+        tris.push_back({a, b, c, m});
+        (void)n;
+    }
+    return tris;
+}
+
 /// 三叶结管道网格(tube around trefoil curve)
 static std::vector<Triangle> makeTrefoil(const Material* m, int segT, int segR, float tube) {
     std::vector<Vec3> ring;
@@ -343,11 +447,53 @@ int main(int argc, char** argv) {
     };
     w.spheres = { {{0.72f, 0.16f, 0.32f}, 0.16f, &metal} };
     // 三叶结: 缩放进箱子中央
+    // 资产链: 生成 → 写 glTF(练习 3) → 读回 → 建三角形(证明"任何 glTF 输入都能走通")
     auto tris = makeTrefoil(&knot, 256, 40, 0.085f);
     for (auto& t : tris) { t.a = t.a * 0.24f + Vec3{0.5f, 0.42f, 0.5f};
                            t.b = t.b * 0.24f + Vec3{0.5f, 0.42f, 0.5f};
                            t.c = t.c * 0.24f + Vec3{0.5f, 0.42f, 0.5f}; }
-    w.tris = tris;
+    {
+        // 写 knot.gltf + knot.bin(段序: indices u16 | positions | normals, 19 号同构)
+        std::vector<uint16_t> idx;
+        std::vector<float> pos, nrm;
+        std::vector<int> vmap(tris.size() * 3, -1);
+        auto vkey = [&](int ti, int vi) { return ti * 3 + vi; };
+        (void)vkey;
+        // 顶点去重(教学: 直接全量, 无索引优化)
+        for (size_t ti = 0; ti < tris.size(); ti++) {
+            const Vec3 vs[3] = {tris[ti].a, tris[ti].b, tris[ti].c};
+            Vec3 n = norm(cross(tris[ti].b - tris[ti].a, tris[ti].c - tris[ti].a));
+            for (int vi = 0; vi < 3; vi++) {
+                idx.push_back(uint16_t(pos.size() / 3));
+                pos.insert(pos.end(), {vs[vi].x, vs[vi].y, vs[vi].z});
+                nrm.insert(nrm.end(), {n.x, n.y, n.z});
+            }
+        }
+        std::ofstream bin("knot.bin", std::ios::binary);
+        size_t idxBytes = idx.size() * 2;
+        bin.write((char*)idx.data(), idxBytes);
+        size_t pad = (4 - idxBytes % 4) % 4;
+        bin.write("\0\0\0", pad);
+        size_t posOff = idxBytes + pad;
+        bin.write((char*)pos.data(), pos.size() * 4);
+        size_t nrmOff = posOff + pos.size() * 4;
+        bin.write((char*)nrm.data(), nrm.size() * 4);
+        char head[512];
+        std::snprintf(head, sizeof head,
+            "{\"asset\":{\"version\":\"2.0\"},"
+            "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":1,\"NORMAL\":2},\"indices\":0}]}],"
+            "\"bufferViews\":[{\"byteOffset\":0,\"byteLength\":%zu},"
+            "{\"byteOffset\":%zu,\"byteLength\":%zu},"
+            "{\"byteOffset\":%zu,\"byteLength\":%zu}],"
+            "\"accessors\":[{\"count\":%zu},{\"count\":%zu},{\"count\":%zu}]}",
+            idxBytes, posOff, pos.size()*4, nrmOff, nrm.size()*4,
+            idx.size(), pos.size()/3, pos.size()/3);
+        std::ofstream gf("knot.gltf");
+        gf << head;
+    }
+    auto g = loadGltf("knot");
+    fflush(stdout); printf("glTF 往返: %zu 索引 / %zu 顶点\n", g.idx.size(), g.pos.size());
+    w.tris = gltfToTriangles(g, &knot, 1.0f, Vec3{0, 0, 0});
     w.lightMat = &light;
     for (auto& r : w.rects) if (r.m == &light) w.lightRect = r;
 
