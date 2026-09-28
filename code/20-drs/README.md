@@ -22,6 +22,10 @@ docs/27 案例 C 的最后一个缺口骨架，对应 docs/07 §8.3 动态画质
 
 **headless 验证（控制器单测）**：33ms 载荷 5 步降至 0.5；5ms 载荷滞回升满 1.0；交替 40/2ms 抖动输入下仅 5 次换档、终值稳定——**无震荡即滞回的意义**。
 
+## 开发实录踩坑
+
+验证脚本生成 Swift 单测时用嵌套 heredoc（外层 `<<'EOF'` 内层 `<<'SWIFT'`），给内层补 `import Foundation` 的 sed 因引号差异（`<<SWIFT` 匹配不上 `<<'SWIFT'`）**静默失败**，`exit`/`String(format:)` 找不到符号。教训：**生成代码的脚本也要断言生成物**；heredoc 定界符的引号差异是 shell 元坑。
+
 ## 练习路线（对照 docs/27 案例 C）
 
 1. 接 MetalFX：`MTLFXTemporalScaler` 替换 bilinear（需要历史颜色 + 运动矢量 + 深度，13 号 TAA 的速度缓冲知识直接复用）
