@@ -3,8 +3,9 @@
 #   1) C++ 示例: 构建+渲染+产物断言(TGA 统计/探针)
 #   2) 纯逻辑单测(可注入控制器)
 #   3) Metal 示例: 构建冒烟(真机 GUI 无法无人值守验证, 用 build-all.sh --run 人工触发)
-# 用法: ./tools/verify-all.sh
+# 用法: ./tools/verify-all.sh [--skip-metal]   (CI 用 --skip-metal: Metal 工具链在无人环境不可控)
 set -uo pipefail
+SKIP_METAL=no; [ "${1:-}" = "--skip-metal" ] && SKIP_METAL=yes
 cd "$(dirname "$0")/.."
 FAIL=0
 step() { echo; echo "==== $1 ===="; }
@@ -40,8 +41,10 @@ open('/tmp/drs_full_v.swift','w').write(ctrl[ctrl.index('/// DRS 控制器'):ctr
 PY
 swiftc -O /tmp/drs_full_v.swift -o /tmp/drs_full_v && /tmp/drs_full_v || FAIL=1
 
-step "Metal 示例: 全量构建"
-(cd code && ./build-all.sh) || FAIL=1
+if [ "$SKIP_METAL" = no ]; then
+    step "Metal 示例: 全量构建"
+    (cd code && ./build-all.sh) || FAIL=1
+fi
 
 echo
 [ "$FAIL" = 0 ] && echo "✅ 全部验证通过" || echo "❌ 存在失败项"

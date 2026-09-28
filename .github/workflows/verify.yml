@@ -1,0 +1,11 @@
+# 可复现验证的 CI 化: C++ 产物断言 + 控制器单测(Metal 构建需 Metal Toolchain
+# 独立组件下载, 在无人环境不可控, 本地用 ./tools/verify-all.sh 全量跑)
+name: verify
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: 可无人值守验证(C++/逻辑)
+        run: ./tools/verify-all.sh --skip-metal
