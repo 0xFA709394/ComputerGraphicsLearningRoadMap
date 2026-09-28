@@ -242,7 +242,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         sphereVB = vb; sphereIB = ib; sphereIndexCount = count
 
         var quads: [SphereVertex] = []
-        let TILES = 8, S: Float = 40
+        let TILES = 16, S: Float = 12   // 破案(踩坑3): ±40 大范围顶点 NDC 投到 ±30+, 驱动丢弃整三角形
+                                      // ——11 号"相机后顶点"的同族症状(保护带外三角形); 收缩范围+细分即好
         for iy in 0..<TILES {
             for ix in 0..<TILES {
                 let step = 2 * S / Float(TILES)
