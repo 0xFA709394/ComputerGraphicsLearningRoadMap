@@ -20,6 +20,41 @@ kernel void bitonicStep(device float4 *data [[buffer(0)]],
     }
 }
 
+// ---- GPU radix 排序(LSB, 4-bit × 8 pass; docs/27 案例 D 的工业正主) ----
+// pass p: 1) 直方图(全局原子, 16 bin) 2) 前缀和(单线程组) 3) 散射(游标原子)
+// 键内含负载(索引在低 32 位), 非稳定排序不影响正确性。
+kernel void radixHist(device const ulong *keys [[buffer(0)]],
+                      device atomic_uint *hist [[buffer(1)]],
+                      constant uint &shift [[buffer(2)]],
+                      uint gid [[thread_position_in_grid]]) {
+    uint digit = uint(keys[gid] >> shift) & 0xF;
+    atomic_fetch_add_explicit(&hist[digit], 1, memory_order_relaxed);
+}
+kernel void radixScan(device uint *hist [[buffer(0)]],      // 16 bin: 就地前缀和(含 0)
+                      threadgroup uint *tg [[threadgroup(0)]],
+                      uint ti [[thread_position_in_threadgroup]]) {
+    if (ti < 16) tg[ti] = hist[ti];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (ti == 0) {                                          // 16 元素串行 scan(教学版)
+        uint sum = 0;
+        for (int i = 0; i < 16; i++) { uint v = tg[i]; tg[i] = sum; sum += v; }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (ti < 16) hist[ti] = tg[ti];
+}
+kernel void radixScatter(device const ulong *keysIn [[buffer(0)]],
+                         device ulong *keysOut [[buffer(1)]],
+                         device atomic_uint *cursor [[buffer(2)]],   // 16 bin 游标(从 scan 偏移起)
+                         constant uint &shift [[buffer(3)]],
+                         uint gid [[thread_position_in_grid]]) {
+    uint digit = uint(keysIn[gid] >> shift) & 0xF;
+    uint pos = atomic_fetch_add_explicit(&cursor[digit], 1, memory_order_relaxed);
+    keysOut[pos] = keysIn[gid];
+}
+kernel void clearBins(device atomic_uint *bins [[buffer(0)]], uint gid [[thread_position_in_grid]]) {
+    if (gid < 16) atomic_store_explicit(&bins[gid], 0, memory_order_relaxed);
+}
+
 // ---- 渲染: 点精灵, 颜色 = 排序后的名次(rank) → 深度扫过时颜色流动 = 排序的可视化证明 ----
 struct Uniforms {
     float4x4 viewProj;

@@ -22,10 +22,24 @@ docs/07 §6 模式库「排序」条目的落地，同时是 **docs/27 进阶案
 
 **headless 验证**：回读缓冲断言**单调违例 0/65535**（完全有序）；lit 17.2% 点云带渐变。
 
+## v2 · GPU radix 排序（练习 2 落地）
+
+LSB radix：**16 pass × 4-bit nibble 全覆盖 64 位键**，每 pass 三 kernel：
+`radixHist`（全局原子计数 16 bin）→ `radixScan`（单线程组串行前缀和，教学版）→ `radixScatter`（游标原子散射）。
+
+**headless 基准**：32k 键违例 0/32767；radix 4.89ms vs bitonic 1.94ms——**教学版更慢**，原因正是工业差距所在：
+全局原子在 16 bin 上争用（32768 线程打 16 个地址）而无 threadgroup 聚合；16 次 pass 的 dispatch 开销。
+工业版（案例 D）：threadgroup 内聚合直方图 + 多桶扫描 + 一次性 uint16 键——把 4.89ms 打进 0.5ms 量级。
+
+**v2 踩坑实录**：
+1. **`thread_position_in_threadgroup` 是属性不是函数**——MSL 里只能 `uint ti [[thread_position_in_threadgroup]]` 作为参数传入，函数体内直接调用报 undeclared（独立最小文件单测抓出）。
+2. **radix 排的是键缓冲不是数据缓冲**——初版把 SIMD4 点数据当 ulong 键排，违例一半。分离 `radixKeys/radixScratch` 后干净。
+3. **`cb.waitUntilCompleted()` 前忘了 `cb.commit()` = 永久死等**——基准挂 9 分钟的元凶。
+
 ## 与 3DGS/透明的实战差距（练习路线）
 
 1. 键量化：float32 → uint16（3DGS 工业做法，比较代价减半）
-2. bitonic → **GPU radix**（3DGS 真主流：docs/27 案例 D 第 11~12 周的带宽优化题）
+2. ~~bitonic → GPU radix~~ **已落地（v2）**；进阶：threadgroup 聚合直方图 + 多桶扫描（工业 3DGS 形态）
 3. 排序值携带负载（3DGS 排的是索引而非数据——间接取 splat）
 4. 分帧排序：相机慢转时隔帧重排（带宽减半的工程折中）
 5. threadgroup 内存版本：组内排序 + 组间归并（docs/07 扩展 A 的树形归约思想）

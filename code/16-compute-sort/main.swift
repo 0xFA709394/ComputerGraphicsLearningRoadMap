@@ -37,6 +37,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     let queue: MTLCommandQueue
     let points: MTLBuffer           // xyz + w(键)
     let sortPSO: MTLComputePipelineState
+    let histPSO, scanPSO, scatterPSO, clearPSO: MTLComputePipelineState
+    let histBuf, cursorBuf: MTLBuffer          // 16 bin × 4B
+    let radixKeys, radixScratch: MTLBuffer     // radix 专用 ulong 键缓冲(64B... 8B/键)
     let renderPSO: MTLRenderPipelineState
     var sortedOn = true
     // headless 验证钩子
@@ -70,6 +73,14 @@ final class Renderer: NSObject, MTKViewDelegate {
               let pv = lib.makeFunction(name: "ptVert"),
               let pf = lib.makeFunction(name: "ptFrag") else { return nil }
         sortPSO = try! device.makeComputePipelineState(function: stepFn)
+        histPSO = try! device.makeComputePipelineState(function: lib.makeFunction(name: "radixHist")!)
+        scanPSO = try! device.makeComputePipelineState(function: lib.makeFunction(name: "radixScan")!)
+        scatterPSO = try! device.makeComputePipelineState(function: lib.makeFunction(name: "radixScatter")!)
+        clearPSO = try! device.makeComputePipelineState(function: lib.makeFunction(name: "clearBins")!)
+        histBuf = device.makeBuffer(length: 64, options: .storageModeShared)!
+        cursorBuf = device.makeBuffer(length: 64, options: .storageModeShared)!
+        radixKeys = device.makeBuffer(length: N * 8, options: .storageModeShared)!
+        radixScratch = device.makeBuffer(length: N * 8, options: .storageModeShared)!
 
         let pd = MTLRenderPipelineDescriptor()
         pd.vertexFunction = pv
@@ -126,6 +137,45 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         cb.present(drawable)
         cb.commit()
+    }
+
+    /// GPU radix: 8 pass × (clear+hist / scan / scatter)。返回耗时 ms。
+    @discardableResult
+    func radixSort(cb: MTLCommandBuffer) -> Double {
+        let t0 = CACurrentMediaTime()
+        guard let enc = cb.makeComputeCommandEncoder() else { return 0 }
+        let tg = MTLSize(width: 256, height: 1, depth: 1)
+        let groups = MTLSize(width: N / 256, height: 1, depth: 1)
+        var srcBuf = radixKeys, dstBuf = radixScratch   // 排序对象 = ulong 键缓冲
+        for pass in 0..<16 {                            // 64 位键: 16 nibble 全覆盖
+            var shift = UInt32(pass * 4)
+            enc.setComputePipelineState(clearPSO)
+            enc.setBuffer(histBuf, offset: 0, index: 0)
+            enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
+            enc.setComputePipelineState(clearPSO)
+            enc.setBuffer(cursorBuf, offset: 0, index: 0)
+            enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
+            enc.setComputePipelineState(histPSO)
+            enc.setBuffer(srcBuf, offset: 0, index: 0)
+            enc.setBuffer(histBuf, offset: 0, index: 1)
+            enc.setBytes(&shift, length: 4, index: 2)
+            enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
+            enc.setComputePipelineState(scanPSO)
+            enc.setBuffer(histBuf, offset: 0, index: 0)
+            enc.setThreadgroupMemoryLength(64, index: 0)
+            enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
+                                     threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+            enc.setComputePipelineState(scatterPSO)
+            enc.setBuffer(srcBuf, offset: 0, index: 0)
+            enc.setBuffer(dstBuf, offset: 0, index: 1)
+            enc.setBuffer(cursorBuf, offset: 0, index: 2)
+            enc.setBytes(&shift, length: 4, index: 3)
+            enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
+            // 交换 src/dst(radix 偶数 pass 后数据回到 points)
+            let tmp = srcBuf; srcBuf = dstBuf; dstBuf = tmp
+        }
+        enc.endEncoding()
+        return (CACurrentMediaTime() - t0) * 1000
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
