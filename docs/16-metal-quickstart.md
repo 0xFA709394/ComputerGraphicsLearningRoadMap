@@ -194,5 +194,7 @@ Day6-7 接 03 章 GGX 直接光       验收: 白炉测试跑通
 | **第一个 encoder 的输出被擦掉** | 同一 rpd 开第二个 encoder 时 loadAction 仍是 .clear → 改 .load | 12 |
 | **天空穹顶噪点碎斑** | 相机在网格内部且未剔除朝外正面, 正反两面采样随机覆盖 | 12 |
 | **shader 读到垃圾矩阵** | Uniforms 里放了 Swift Array(引用类型), setBytes 只拷 8 字节指针 → 平铺字段 | 11 |
+| **片元读 obj/material 恒为零(字面黑)** | 只 setVertexBytes 没调 setFragmentBytes——**顶点/片元缓冲是两个独立名字空间** | 14 |
+| **像素探针结论全错** | 纹理/RT 行序与屏幕坐标上下翻转(Metal NDC y 约定)→ 探针先验朝向 | 14 |
 | **metal 找不到** | CLT 无 Metal 工具链; Xcode 26 起为独立下载组件 | 各 build.sh |
 | **混合属性编译错** | 新 SDK 改名 sourceRGBBlendFunction → *BlendFactor | 08 |
