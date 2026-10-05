@@ -6,6 +6,7 @@
 // 验收: Cornell Box + 三叶结成像; BVH vs 暴力遍历的加速比(基准打印)。
 
 #include <algorithm>
+#include <cstring>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -44,10 +45,10 @@ struct Rng {
 };
 struct Ray { Vec3 o, d; };
 struct Material {
-    enum Kind { Lambert, Metal, Light } kind;
+    enum Kind { Lambert, Metal, Light, Dielectric } kind;
     Vec3 albedo, emit;
 };
-struct Hit { float t{}; Vec3 p, n; bool front{}; const Material* m{}; };
+struct Hit { float t{}; Vec3 p, n; bool front{}; const Material* m{}; };   // front: 命中外表面(介质折射方向判定用)
 
 // ---------- AABB + 三角形(Möller–Trumbore, docs/06 §求交推导) ----------
 struct Aabb {
@@ -87,7 +88,8 @@ struct Triangle {
         if (v < 0 || u + v > 1) return false;
         float t = dot(e2, qvec) * inv;
         if (tmin < t && t < tmax) {
-            h = {t, r.o + r.d*t, norm(cross(e1, e2)), true, m};
+            Vec3 n = norm(cross(e1, e2));
+            h = {t, r.o + r.d*t, n, dot(r.d, n) < 0, m};
             return true;
         }
         return false;
@@ -188,7 +190,8 @@ struct Sphere {
         float sq = std::sqrt(disc);
         for (float t : { (-hb - sq)/a, (-hb + sq)/a })
             if (tmin < t && t < tmax) {
-                h = {t, ray.o + ray.d*t, norm(ray.o + ray.d*t - c), true, m};
+                Vec3 n = norm(ray.o + ray.d*t - c);
+                h = {t, ray.o + ray.d*t, n, dot(ray.d, n) < 0, m};
                 return true;
             }
         return false;
@@ -266,7 +269,25 @@ static Vec3 trace(const World& w, Ray ray, Rng& rng) {
         if (!w.hit(ray, 1e-4f, 1e30f, h)) break;
         if (h.m->kind == Material::Light) { if (spec) rad += tp * h.m->emit; break; }
         if (h.m->kind == Material::Lambert) rad += tp * neeDirect(w, h, rng);
-        Ray out = {h.p, cosineHemisphere(rng, h.n)};
+        Ray out{h.p, cosineHemisphere(rng, h.n)};
+        if (h.m->kind == Material::Dielectric) {          // 光滑介质: Schlick 折/反(镜面链, spec 保持 true)
+            Vec3 n1 = h.front ? h.n : -h.n;
+            bool into = dot(ray.d, n1) < 0;
+            float ior = into ? (1.f/1.5f) : 1.5f;
+            float ct = std::fmin(dot(-norm(ray.d), n1), 1.f);
+            float st = std::sqrt(1 - ct*ct);
+            bool refl = ior*st > 1;
+            float f0 = (1-1.5f)/(1+1.5f); f0 *= f0;
+            if (refl || rng.u() < f0 + (1-f0)*std::pow(1-ct, 5))
+                out.d = norm(ray.d + n1*(2*dot(-ray.d, n1)));
+            else {
+                Vec3 dPerp = (norm(ray.d) + n1*ct) * ior;
+                out.d = norm(dPerp + n1 * -std::sqrt(std::fabs(1 - dot(dPerp, dPerp))));
+                out.o = h.p - n1*1e-4f;
+            }
+            ray = out;
+            continue;                                      // 镜面不衰减 throughput(教学简化)
+        }
         tp = tp * h.m->albedo;
         if (tp.x + tp.y + tp.z < 1e-4f) break;
         spec = false;
@@ -284,6 +305,28 @@ struct Camera {
     }
     Ray ray(float sx, float sy) const { return {o, norm(ll + hor*sx + ver*sy - o)}; }
 };
+
+// ---------- 单向 MLT(docs/27 案例 B 第 8~9 周教学版) ----------
+// 状态 = 像素样本(u,v + 路径种子)。大步长跳变 10%(遍历性) + 小步变异 90%,
+// Metropolis 接受 I(new)/I(old); 预热估 b(平均亮度) 做期望归一。
+struct MltState {
+    float u, v;
+    uint64_t seed;
+    float luminance;
+};
+static float evalSample(const World& w, const Camera& cam, const MltState& st) {
+    Rng rng = Rng(st.seed);
+    Vec3 c = trace(w, cam.ray(st.u, st.v), rng);
+    return (c.x + c.y + c.z) / 3;
+}
+static MltState mutate(const MltState& s, Rng& rng) {
+    MltState n = s;
+    n.u = std::fmod(s.u + 0.02f * (rng.u()*2-1) + 1.0f, 1.0f);
+    n.v = std::clamp(s.v + 0.02f * (rng.u()*2-1), 0.0f, 1.0f);
+    n.seed = s.seed ^ (((uint64_t)(rng.u() * 0xFFFFFFFF) << 1) | 1);
+    n.luminance = 0;
+    return n;
+}
 
 // ---------- glTF 2.0 最小读回器(与 19 号 writer 互通; 单 mesh + POSITION/NORMAL + u16 索引) ----------
 // 教学实现: 手写 JSON 字段定位(非通用解析器); 生产用 cgltf/tinygltf。
@@ -432,6 +475,8 @@ int main(int argc, char** argv) {
     int H = argc > 2 ? std::atoi(argv[2]) : 360;
     int spp = argc > 3 ? std::atoi(argv[3]) : 96;
 
+    bool mltMode = argc > 4 && std::strcmp(argv[4], "--mlt") == 0;
+    static Material glass{Material::Dielectric, {1,1,1}};
     Material white{Material::Lambert, {0.86f,0.86f,0.86f}},
              red{Material::Lambert, {0.70f,0.12f,0.10f}},
              green{Material::Lambert, {0.12f,0.55f,0.16f}},
@@ -521,10 +566,65 @@ int main(int argc, char** argv) {
     // ---- 渲染 ----
     Camera cam({0.5f, 0.5f, -1.7f}, {0.5f, 0.5f, 1.0f}, 38, float(W)/float(H));
     std::vector<Vec3> accum(size_t(W)*H);
-    std::atomic<int> nextRow{0};
     int nThreads = int(std::thread::hardware_concurrency());
-    std::vector<std::thread> pool;
     auto t1 = std::chrono::steady_clock::now();
+    if (mltMode) {
+        // ---- Metropolis: 每线程独立马尔可夫链, 期望归一 ----
+        std::vector<std::thread> pool;
+        std::atomic<int> nextChain{0};
+        for (int tid = 0; tid < nThreads; tid++)
+            pool.emplace_back([&, tid] {
+                Rng rng(0xA5A5A5A5ULL ^ (uint64_t(tid+1)*0x9E3779B9ULL));
+                MltState cur{rng.u(), rng.u(), (uint64_t)(rng.u()*0xFFFFFFFF), 0};
+                cur.luminance = evalSample(w, cam, cur);
+                double bSum = 0;
+                const int warm = 8000;
+                for (int i = 0; i < warm; i++) {           // 预热求 b(平均亮度)
+                    MltState prop = mutate(cur, rng);
+                    prop.luminance = evalSample(w, cam, prop);
+                    if (cur.luminance <= 0 || rng.u() < prop.luminance / std::max(cur.luminance, 1e-6f))
+                        cur = prop;
+                    bSum += cur.luminance;
+                }
+                float b = std::max(float(bSum / warm), 1e-6f);
+                int chains = 64;
+                int stepsPer = spp * W * H / (nThreads * chains);
+                for (;;) {
+                    int ci = nextChain.fetch_add(1);
+                    if (ci >= chains) break;
+                    Rng crng(0xC0FFEEULL ^ (uint64_t(ci+1)*0xBF58476DULL));
+                    MltState cc{crng.u(), crng.u(), (uint64_t)(crng.u()*0xFFFFFFFF), 0};
+                    cc.luminance = evalSample(w, cam, cc);
+                    for (int i = 0; i < stepsPer; i++) {
+                        MltState prop;
+                        if (crng.u() < 0.1f)                // 大步长跳变(遍历性)
+                            prop = MltState{crng.u(), crng.u(), (uint64_t)(crng.u()*0xFFFFFFFF), 0};
+                        else
+                            prop = mutate(cc, crng);        // 小步变异
+                        prop.luminance = evalSample(w, cam, prop);
+                        float a = cc.luminance <= 0 ? 1.0f
+                                : prop.luminance / std::max(cc.luminance, 1e-6f);
+                        if (crng.u() < a) cc = prop;        // Metropolis 接受
+                        int px = int(cc.u * W), py = int((1 - cc.v) * H);
+                        if (px >= 0 && py >= 0 && px < W && py < H && cc.luminance > 0)
+                            accum[size_t(py)*W + px] += Vec3{cc.luminance/b, cc.luminance/b, cc.luminance/b};
+                    }
+                }
+                // 正确归一: 每像素累计 = Σ(Ii/b) 已是"期望亮度"; 但 splat 数 ≠ 像素数,
+                // 还需除以"每像素平均 splat 数"(= 总 splat / 像素数) 才是亮度期望。
+                // (归一移到 join 之后; 此处仅本线程诊断)
+                double sum = 0; int nz = 0; float mx = 0;
+                for (auto& c : accum) { sum += c.x + c.y + c.z; if (c.x+c.y+c.z > 0) nz++; mx = std::max(mx, c.x); }
+                std::printf("MLT 线程: b=%.4f 非零=%d/%zu 峰值=%.1f\n", b, nz, accum.size(), mx);
+            });
+        for (auto& t : pool) t.join();
+        // join 后统一归一: 每像素平均 splat 数
+        double totalSplats = double(nThreads) * 64 * 7680;
+        float perPixel = float(totalSplats) / (W * H);
+        for (auto& c : accum) c = c / perPixel;
+    } else {
+    std::atomic<int> nextRow{0};
+    std::vector<std::thread> pool;
     for (int tid = 0; tid < nThreads; tid++)
         pool.emplace_back([&, tid] {
             Rng rng(0x9E3779B97F4A7C15ULL ^ (uint64_t(tid+1)*0xBF58476D1CE4E5B9ULL));
@@ -540,6 +640,7 @@ int main(int argc, char** argv) {
             }
         });
     for (auto& t : pool) t.join();
+    }
     double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t1).count();
 
     std::vector<uint8_t> px(size_t(W)*H*3);
