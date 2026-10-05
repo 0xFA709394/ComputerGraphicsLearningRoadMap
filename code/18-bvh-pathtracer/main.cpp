@@ -460,6 +460,46 @@ static std::vector<Triangle> makeTrefoil(const Material* m, int segT, int segR, 
     return tris;
 }
 
+// ---------- PFM + RMSD: "物理正确"的定量证明(docs/27 案例 B 第 12 周) ----------
+static bool writePFM(const char* path, int w, int h, const std::vector<Vec3>& px) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    f << "PF\n" << w << " " << h << "\n-1.0\n";
+    std::vector<float> buf(size_t(w) * h * 3);
+    for (size_t i = 0; i < px.size(); i++) {
+        buf[i*3+0] = px[i].x; buf[i*3+1] = px[i].y; buf[i*3+2] = px[i].z;
+    }
+    f.write((const char*)buf.data(), buf.size() * 4);
+    return bool(f);
+}
+static std::vector<float> readPFM(const char* path, int& w, int& h) {
+    std::ifstream f(path, std::ios::binary);
+    std::string magic; f >> magic;
+    if (magic != "PF") return {};
+    f >> w >> h;
+    float scale; f >> scale;
+    f.get();
+    std::vector<float> buf(size_t(w) * h * 3);
+    f.read((char*)buf.data(), buf.size() * 4);
+    return buf;
+}
+static int compareMain(int argc, char** argv) {
+    if (argc < 4) { std::printf("用法: compare a.pfm b.pfm\n"); return 1; }
+    int wa, ha, wb, hb;
+    auto A = readPFM(argv[2], wa, ha);
+    auto B = readPFM(argv[3], wb, hb);
+    if (A.empty() || B.empty() || wa != wb || ha != hb) { std::printf("PFM 读取失败或尺寸不匹配\n"); return 1; }
+    double se = 0, peak = 0;
+    for (size_t i = 0; i < A.size(); i++) {
+        double d = A[i] - B[i];
+        se += d * d;
+        peak = std::max(peak, std::fabs(d));
+    }
+    double rmsd = std::sqrt(se / A.size());
+    std::printf("RMSD = %.6f  (peak diff = %.4f)  [%s vs %s]\n", rmsd, peak, argv[2], argv[3]);
+    return 0;
+}
+
 static bool writeTGA(const char* path, int w, int h, const std::vector<uint8_t>& px) {
     std::ofstream f(path, std::ios::binary);
     if (!f) return false;
@@ -471,6 +511,7 @@ static bool writeTGA(const char* path, int w, int h, const std::vector<uint8_t>&
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "compare") == 0) return compareMain(argc, argv);
     int W = argc > 1 ? std::atoi(argv[1]) : 480;
     int H = argc > 2 ? std::atoi(argv[2]) : 360;
     int spp = argc > 3 ? std::atoi(argv[3]) : 96;
@@ -650,7 +691,8 @@ int main(int argc, char** argv) {
         px[i*3+1] = uint8_t(std::clamp(std::sqrt(c.y), 0.f, 1.f)*255);
         px[i*3+2] = uint8_t(std::clamp(std::sqrt(c.x), 0.f, 1.f)*255);
     }
+    writePFM("out.pfm", W, H, accum);
     if (!writeTGA("out.tga", W, H, px)) { printf("写 out.tga 失败\n"); return 1; }
-    printf("渲染: %dx%d@%dspp, %d 线程, %.0fms → out.tga\n", W, H, spp, nThreads, ms);
+    printf("渲染: %dx%d@%dspp, %d 线程, %.0fms → out.tga + out.pfm\n", W, H, spp, nThreads, ms);
     return 0;
 }

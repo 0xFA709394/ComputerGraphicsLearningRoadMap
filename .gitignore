@@ -11,3 +11,4 @@ code/19-gltf-loader/knot.bin
 code/19-gltf-loader/out.png
 code/18-bvh-pathtracer/knot.gltf
 code/18-bvh-pathtracer/knot.bin
+code/18-bvh-pathtracer/*.pfm

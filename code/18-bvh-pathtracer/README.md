@@ -59,6 +59,19 @@ docs/06 §求交/加速结构的落地，docs/27 案例 B 第 1~2 周的参考�
 2. **多线程 accum 归一化必须在 join 之后**：每线程各自乘归一系数 = 后写线程覆盖前写线程的缩放（数据静默错 10 倍）。
 3. **`Vec3` 无 `/double` 运算符**：以最晦涩的编译错误表现——标量除法要写成分量除。
 
+## v5 · PFM 线性输出 + RMSD 定量对比（第 12 周落地）
+
+- `out.pfm`：**线性 HDR 浮点输出**（Portable Float Map，通用工具可读）——gamma 前的原值，物理对比的基准格式；
+- `./bvhpt compare a.pfm b.pfm`：**RMSD + 峰值差**——低 spp 对高 spp 参考的误差定量。
+  实测：32spp vs 1024spp 参考 → RMSD 0.0999（峰值差 2.82）。这是"我的渲染器收敛到真值"的**可复现证明**，也是后续任何优化（BDPT 权重、MLT 归一）不引入偏差的回归测试。
+
+**用法**：
+```bash
+./bvhpt 200 150 32 no-mlt && cp out.pfm ref.pfm
+./bvhpt 200 150 1024 no-mlt          # 高质量参考
+./bvhpt compare ref.pfm out.pfm      # 改动前后跑一次, RMSD 不涨 = 无回归
+```
+
 ## 练习路线（对照 docs/27 案例 B）
 
 1. 遍历改显式栈（去递归）+ 最近子树先访（缓存友好）
