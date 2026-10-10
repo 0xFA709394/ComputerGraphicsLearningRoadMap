@@ -216,14 +216,58 @@ struct Rect {
     }
 };
 
+struct Volume {
+    Aabb box;
+    float density = 0;               // 消光系数 σt(1/距离)
+    Vec3 albedo{0.9f, 0.9f, 0.95f};  // 散射反照率
+    bool active() const { return density > 0; }
+};
+
 struct World {
     std::vector<Sphere> spheres;
     std::vector<Rect> rects;
     std::vector<Triangle> tris;      // 三叶结网格
     Bvh bvh;
+    Volume volume;                   // 同质参与介质(教学: 单域)
     const Material* lightMat{};
     Rect lightRect{};
     bool useBvh = true;
+
+    // 体渲染: 射线段 [tmin,tmax] 内按 σt 指数分布采样散射点; 未散射返回 false
+    // 单散射教学版: 散射后直接向光源 NEE(docs/06 §参与介质)
+    bool scatterInVolume(Ray ray, float tmin, float tmax, Rng& rng,
+                         float& scatterT, Vec3& attenuation) const {
+        if (!volume.active()) return false;
+        // 与体积盒求交裁出射线段
+        if (!volume.box.hit(ray, tmin, tmax)) return false;
+        // 重构盒交: slab 已在 hit 里, 这里粗略重算(教学清晰优先)
+        float t0 = tmin, t1 = tmax;
+        {
+            const Aabb& b = volume.box;
+            for (int a = 0; a < 3; a++) {
+                float ro = a==0?ray.o.x:a==1?ray.o.y:ray.o.z, rd = a==0?ray.d.x:a==1?ray.d.y:ray.d.z;
+                float inv = 1.0f / rd;
+                float mn = a==0?b.mn.x:a==1?b.mn.y:b.mn.z, mx = a==0?b.mx.x:a==1?b.mx.y:b.mx.z;
+                float s0 = (mn - ro) * inv, s1 = (mx - ro) * inv;
+                if (inv < 0) std::swap(s0, s1);
+                t0 = std::max(t0, s0); t1 = std::min(t1, s1);
+                if (t1 <= t0) return false;
+            }
+        }
+        // Beer 定律采样: t = -ln(ξ)/σt
+        float t = t0 - std::log(1 - rng.u()) / volume.density;
+        if (t >= t1) {                    // 穿过体积未散射
+            attenuation = Vec3{std::exp(-volume.density*(t1-t0)),
+                               std::exp(-volume.density*(t1-t0)),
+                               std::exp(-volume.density*(t1-t0))};
+            return false;
+        }
+        scatterT = t;
+        attenuation = Vec3{std::exp(-volume.density*(t-t0)),
+                           std::exp(-volume.density*(t-t0)),
+                           std::exp(-volume.density*(t-t0))};
+        return true;
+    }
 
     bool hit(const Ray& r, float tmin, float tmax, Hit& best) const {
         bool any = false;
@@ -266,7 +310,38 @@ static Vec3 trace(const World& w, Ray ray, Rng& rng) {
     bool spec = true;
     for (int depth = 0; depth < 6; depth++) {
         Hit h; h.t = 1e30f;
-        if (!w.hit(ray, 1e-4f, 1e30f, h)) break;
+        bool hitSurface = w.hit(ray, 1e-4f, 1e30f, h);
+        static Hit volDummy;
+        // ---- 体渲染: 散射事件早于表面命中则处理介质(docs/06 §参与介质) ----
+        if (w.volume.active()) {
+            float st; Vec3 att;
+            if (w.scatterInVolume(ray, 1e-4f, hitSurface ? h.t : 1e30f, rng, st, att)) {
+                tp = tp * att;
+                Vec3 sp = ray.o + ray.d * st;
+                // 相位函数(各向同性 1/4π) × 向光源 NEE(穿体积再衰减)
+                const Rect& LR = w.lightRect;
+                Vec3 lp{LR.a0 + rng.u()*(LR.a1-LR.a0), LR.k, LR.b0 + rng.u()*(LR.b1-LR.b0)};
+                Vec3 wl = norm(lp - sp);
+                float d2 = dot(lp - sp, lp - sp);
+                Hit sh; sh.t = 1e30f;
+                bool blocked = w.hit({sp, wl}, 1e-3f, std::sqrt(d2) - 1e-3f, sh);
+                // 光源→散射点 的体积透射(Beer)
+                float volT = 1.0f;
+                if (w.volume.active() && w.volume.box.hit({sp, wl}, 1e-3f, std::sqrt(d2)) && w.volume.density > 0)
+                    volT = std::exp(-w.volume.density * std::sqrt(d2) * 0.9f);   // 近似: 0.9 因子抵消双计
+                float phase = 1 / (4 * float(M_PI));
+                if (!blocked)
+                    rad += tp * att * w.volume.albedo * (phase * w.lightMat->emit.x * volT / d2)
+                           * ((LR.a1-LR.a0) * (LR.b1-LR.b0));
+                // 散射后各向同性继续(docs/06: g=0 Henyey-Greenstein 退化)
+                ray = {sp, norm(Vec3{rng.u()*2-1, rng.u()*2-1, rng.u()*2-1})};
+                if (ray.d.x*ray.d.x + ray.d.y*ray.d.y + ray.d.z*ray.d.z > 1) { ray.d = -ray.d; }
+                ray.d = norm(ray.d);
+                depth++;
+                continue;
+            }
+            if (!hitSurface) break;
+        } else if (!hitSurface) break;
         if (h.m->kind == Material::Light) { if (spec) rad += tp * h.m->emit; break; }
         if (h.m->kind == Material::Lambert) rad += tp * neeDirect(w, h, rng);
         Ray out{h.p, cosineHemisphere(rng, h.n)};
@@ -517,6 +592,7 @@ int main(int argc, char** argv) {
     int spp = argc > 3 ? std::atoi(argv[3]) : 96;
 
     bool mltMode = argc > 4 && std::strcmp(argv[4], "--mlt") == 0;
+    bool volMode = argc > 4 && std::strcmp(argv[4], "--vol") == 0;
     static Material glass{Material::Dielectric, {1,1,1}};
     Material white{Material::Lambert, {0.86f,0.86f,0.86f}},
              red{Material::Lambert, {0.70f,0.12f,0.10f}},
@@ -581,6 +657,8 @@ int main(int argc, char** argv) {
     fflush(stdout); printf("glTF 往返: %zu 索引 / %zu 顶点\n", g.idx.size(), g.pos.size());
     w.tris = gltfToTriangles(g, &knot, 1.0f, Vec3{0, 0, 0});
     w.lightMat = &light;
+    if (volMode) w.volume = {Aabb{}, 0.8f, Vec3{0.75f, 0.85f, 1.0f}};   // 雾: σt=0.35, 冷色反照率
+    if (volMode) w.volume.box.grow(Vec3{0.02f, 0.0f, 0.02f}), w.volume.box.grow(Vec3{0.98f, 0.9f, 0.98f});
     for (auto& r : w.rects) if (r.m == &light) w.lightRect = r;
 
     // ---- 基准: BVH 构建 + 暴力 vs BVH 遍历(docs/27 案例 B 验收) ----
