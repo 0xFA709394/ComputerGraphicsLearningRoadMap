@@ -6,6 +6,7 @@ using namespace metal;
 
 struct Uniforms {
     float4x4 viewProj;      // 已含本帧 subpixel 抖动
+    float4x4 prevViewProj;  // 上一帧(无抖动)——重投影用(案例 A 第 9~10 周深水区)
     float4 camPos;
     float4 misc;            // x: time, y: taaOn, z: 当前帧混合权重(首帧=1)
     float4 texel;           // xy: 1/分辨率
@@ -48,7 +49,36 @@ fragment float4 sceneFrag(VOut in [[stage_in]],
     return float4(base * (0.25 + 0.85 * ndl), 1);          // 线性 HDR 中间结果
 }
 
-// ---- TAA resolve: 历史 clamp 到当前邻域 AABB 后 10% 混合 ----
+// ---- 速度缓冲: 当前像素深度 → 世界 → 上一帧屏幕位置(docs/11 §重投影核心) ----
+struct VelOut {
+    float4 pos [[position]];
+    float2 uv;
+};
+vertex VelOut velVert(uint vid [[vertex_id]]) {
+    float2 p[3] = { float2(-1,-1), float2(3,-1), float2(-1,3) };
+    VelOut o;
+    o.pos = float4(p[vid], 0.5, 1);
+    o.uv = p[vid] * 0.5 + 0.5;
+    return o;
+}
+fragment float2 velFrag(VelOut in [[stage_in]],
+                        texture2d<float> depth [[texture(0)]],
+                        constant Uniforms &u [[buffer(1)]]) {
+    constexpr sampler sn(mag_filter::nearest);
+    float2 uv = in.uv;
+    float z = depth.sample(sn, uv).r;
+    // NDC → clip(-1..1)
+    float4 cur = float4(uv.x * 2 - 1, (1 - uv.y) * 2 - 1, z * 2 - 1, 1);
+    // 本帧(无抖动近似)反投影到世界
+    float4 world = u.viewProj * cur;
+    world /= world.w;
+    // 世界 → 上一帧屏幕
+    float4 prev = u.prevViewProj * world;
+    float2 prevUV = float2(prev.x / prev.w * 0.5 + 0.5, 1 - (prev.y / prev.w * 0.5 + 0.5));
+    return prevUV - uv;                    // 运动向量(像素 UV 差)
+}
+
+// ---- TAA resolve: 历史按速度重投影采样 + clamp ----
 struct QuadOut {
     float4 pos [[position]];
     float2 uv;
@@ -63,11 +93,15 @@ vertex QuadOut quadVert(uint vid [[vertex_id]]) {
 fragment float4 taaResolveFS(QuadOut in [[stage_in]],
                              texture2d<float> current [[texture(0)]],
                              texture2d<float> history [[texture(1)]],
+                             texture2d<float> velocity [[texture(2)]],
                              constant Uniforms &u [[buffer(1)]]) {
     constexpr sampler sn(mag_filter::nearest, address::clamp_to_edge);
+    constexpr sampler sl(mag_filter::linear, address::clamp_to_edge);
     float4 c = current.sample(sn, in.uv);
     if (u.misc.y < 0.5) return c;                          // TAA 关: 直通(画面=抖动闪烁)
-    float4 h = history.sample(sn, in.uv);
+    float2 motion = velocity.sample(sn, in.uv).rg;         // 本帧运动向量
+    float2 histUV = in.uv - motion;                        // 历史重投影位置(docs/11 核心)
+    float4 h = history.sample(sl, histUV);
     float4 mn = c, mx = c;                                 // 3x3 邻域包围盒(AABB clamp 变体)
     for (int y = -1; y <= 1; y++)
         for (int x = -1; x <= 1; x++) {
@@ -75,6 +109,8 @@ fragment float4 taaResolveFS(QuadOut in [[stage_in]],
             mn = min(mn, n); mx = max(mx, n);
         }
     h = clamp(h, mn, mx);
+    // 重投影出界(新露出区域): 历史无效 → 全用当前帧(docs/11 §disocclusion)
+    if (any(histUV < 0.0) || any(histUV > 1.0)) return c;
     return mix(h, c, u.misc.z);                             // docs/11: 90% 历史 + 10% 当前(首帧 1.0)
 }
 

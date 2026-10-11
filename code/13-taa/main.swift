@@ -8,6 +8,7 @@ import simd
 
 struct Uniforms {
     var viewProj: simd_float4x4
+    var prevViewProj: simd_float4x4   // 上一帧无抖动 VP(重投影, 案例 A 深水区)
     var camPos: SIMD4<Float>
     var misc: SIMD4<Float>      // x: time, y: taaOn
     var texel: SIMD4<Float>
@@ -93,13 +94,16 @@ final class Renderer: NSObject, MTKViewDelegate {
     let groundVB: MTLBuffer
     let sceneColor: MTLTexture      // 抖动后的当帧(线性 HDR)
     let sceneDepth: MTLTexture
+    let velocityTex: MTLTexture     // rg=运动向量
     let history: [MTLTexture]       // ping-pong 历史
-    let scenePSO, resolvePSO, blitPSO: MTLRenderPipelineState
+    let scenePSO, resolvePSO, blitPSO, velPSO: MTLRenderPipelineState
     let depthState: MTLDepthStencilState
     var histIdx = 0
     var frame = 0
     var taaOn = true
     var resetHistory = true   // headless: 每段序列从空历史开始
+    var cameraOrbit = true    // v2: 相机绕行(重投影的用武之地)
+    var prevVP: simd_float4x4?
     // headless 验证钩子
     var offRpd: MTLRenderPassDescriptor?
     var fixedTime: Float?
@@ -144,8 +148,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         guard let sc = rgba16(W, H, rt: true),
               let h0 = rgba16(W, H, rt: true),
-              let h1 = rgba16(W, H, rt: true) else { return nil }
-        sceneColor = sc; history = [h0, h1]
+              let h1 = rgba16(W, H, rt: true),
+              let vel = rgba16(W, H, rt: true) else { return nil }
+        sceneColor = sc; history = [h0, h1]; velocityTex = vel
         let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: W, height: H, mipmapped: false)
         dd.usage = .renderTarget
         dd.storageMode = .private
@@ -190,6 +195,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let blitPSO = try? device.makeRenderPipelineState(descriptor: bd) else { return nil }
         self.blitPSO = blitPSO
 
+        let vv = MTLRenderPipelineDescriptor()
+        vv.vertexFunction = lib.makeFunction(name: "velVert")
+        vv.fragmentFunction = lib.makeFunction(name: "velFrag")
+        vv.colorAttachments[0].pixelFormat = .rg16Float
+        guard let velPSO = try? device.makeRenderPipelineState(descriptor: vv) else { return nil }
+        self.velPSO = velPSO
+
         let dz = MTLDepthStencilDescriptor()
         dz.depthCompareFunction = .less
         dz.isDepthWriteEnabled = true
@@ -206,10 +218,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             jx = (halton(i + 1, 2) - 0.5) * 2 / Float(W)
             jy = (halton(i + 1, 3) - 0.5) * 2 / Float(H)
         }
-        let vp = ndcOffsetMat(jx, jy)
-            * perspective(fovY: 46 * .pi / 180, aspect: aspect, n: 0.1, f: 100)
-            * lookAt(eye: SIMD3(0, 2.2, 6.5), target: SIMD3(0, 0.4, 0), up: SIMD3(0, 1, 0))
-        var u = Uniforms(viewProj: vp, camPos: SIMD4(0, 2.2, 6.5, 1),
+        let eye = cameraOrbit ? SIMD3<Float>(sin(t * 0.1) * 6.5, 2.2, cos(t * 0.1) * 6.5)
+                              : SIMD3<Float>(0, 2.2, 6.5)
+        let vpNoJitter = perspective(fovY: 46 * .pi / 180, aspect: aspect, n: 0.1, f: 100)
+            * lookAt(eye: eye, target: SIMD3(0, 0.4, 0), up: SIMD3(0, 1, 0))
+        let vp = ndcOffsetMat(jx, jy) * vpNoJitter
+        var u = Uniforms(viewProj: vp, prevViewProj: prevVP ?? vpNoJitter, camPos: SIMD4(eye, 1),
                          misc: SIMD4(t, taaOn ? 1 : 0, resetHistory ? 1 : 0.1, 0),
                          texel: SIMD4(1 / Float(W), 1 / Float(H), 0, 0))
 
@@ -269,6 +283,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         histIdx ^= 1
         frame += 1
+        prevVP = vpNoJitter
         resetHistory = false
         return cbuf
     }
