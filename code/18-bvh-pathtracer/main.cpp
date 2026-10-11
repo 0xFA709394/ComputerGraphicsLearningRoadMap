@@ -216,11 +216,35 @@ struct Rect {
     }
 };
 
+// 3-octave 价值噪声(哈希格点 + 平滑插值)——异质密度场(docs/06 §异质介质)
 struct Volume {
     Aabb box;
-    float density = 0;               // 消光系数 σt(1/距离)
-    Vec3 albedo{0.9f, 0.9f, 0.95f};  // 散射反照率
+    float density = 0;               // 基础消光系数 σt
+    Vec3 albedo{0.9f, 0.9f, 0.95f};
+    bool heterogeneous = false;      // true: 密度 = base × (0.4 + 噪声)
     bool active() const { return density > 0; }
+    float densityAt(Vec3 p) const {
+        if (!heterogeneous) return density;
+        // 3 octave 价值噪声(教学版: 平滑值噪声, trilinear)
+        auto hash = [](Vec3 q) {
+            float s = std::sin(q.x*127.1f + q.y*311.7f + q.z*74.7f) * 43758.5453f;
+            return s - std::floor(s);
+        };
+        auto smooth = [](float t) { return t * t * (3 - 2 * t); };
+        float v = 0, amp = 0.55f, freq = 3.0f;
+        for (int o = 0; o < 3; o++) {
+            Vec3 q = p * freq;
+            Vec3 ip = {std::floor(q.x), std::floor(q.y), std::floor(q.z)};
+            Vec3 fp = {q.x-ip.x, q.y-ip.y, q.z-ip.z};
+            Vec3 u = {smooth(fp.x), smooth(fp.y), smooth(fp.z)};
+            float a = hash(ip), b = hash(ip+Vec3{1,0,0}), c = hash(ip+Vec3{0,1,0}), d = hash(ip+Vec3{1,1,0});
+            float e = hash(ip+Vec3{0,0,1}), f = hash(ip+Vec3{1,0,1}), g = hash(ip+Vec3{0,1,1}), h = hash(ip+Vec3{1,1,1});
+            float x1 = a + (b-a)*u.x, x2 = c + (d-c)*u.x, x3 = e + (f-e)*u.x, x4 = g + (h-g)*u.x;
+            v += amp * ((x1 + (x2-x1)*u.y) + ((x3 + (x4-x3)*u.y) - (x1 + (x2-x1)*u.y)) * u.z);
+            amp *= 0.5f; freq *= 2.1f;
+        }
+        return density * (0.25f + 1.5f * v);   // 25%~175% 基础密度
+    }
 };
 
 struct World {
@@ -254,19 +278,40 @@ struct World {
                 if (t1 <= t0) return false;
             }
         }
-        // Beer 定律采样: t = -ln(ξ)/σt
-        float t = t0 - std::log(1 - rng.u()) / volume.density;
-        if (t >= t1) {                    // 穿过体积未散射
-            attenuation = Vec3{std::exp(-volume.density*(t1-t0)),
-                               std::exp(-volume.density*(t1-t0)),
-                               std::exp(-volume.density*(t1-t0))};
-            return false;
+        if (!volume.heterogeneous) {
+            // 同质: 解析 Beer 采样(原路径)
+            float t = t0 - std::log(1 - rng.u()) / volume.density;
+            if (t >= t1) {
+                attenuation = Vec3{std::exp(-volume.density*(t1-t0)),
+                                   std::exp(-volume.density*(t1-t0)),
+                                   std::exp(-volume.density*(t1-t0))};
+                return false;
+            }
+            scatterT = t;
+            attenuation = Vec3{std::exp(-volume.density*(t-t0)),
+                               std::exp(-volume.density*(t-t0)),
+                               std::exp(-volume.density*(t-t0))};
+            return true;
         }
-        scatterT = t;
-        attenuation = Vec3{std::exp(-volume.density*(t-t0)),
-                           std::exp(-volume.density*(t-t0)),
-                           std::exp(-volume.density*(t-t0))};
-        return true;
+        // 异质: 均匀步进 raymarch(δ-tracking 教学替代), 步内测 densityAt
+        const int STEPS = 24;
+        float step = (t1 - t0) / STEPS;
+        float trans = 1.0f;
+        for (int i = 0; i < STEPS; i++) {
+            float tm = t0 + (i + 0.5f) * step;
+            Vec3 pm = ray.o + ray.d * tm;
+            float sigma = volume.densityAt(pm);
+            trans *= std::exp(-sigma * step);
+            if (rng.u() > trans) {          // 本步被散射(透射率耗尽)
+                scatterT = tm;
+                attenuation = Vec3{trans/std::max(std::exp(-sigma*step),1e-3f),
+                                   trans/std::max(std::exp(-sigma*step),1e-3f),
+                                   trans/std::max(std::exp(-sigma*step),1e-3f)};
+                return true;
+            }
+        }
+        attenuation = Vec3{trans, trans, trans};
+        return false;
     }
 
     bool hit(const Ray& r, float tmin, float tmax, Hit& best) const {
@@ -327,8 +372,16 @@ static Vec3 trace(const World& w, Ray ray, Rng& rng) {
                 bool blocked = w.hit({sp, wl}, 1e-3f, std::sqrt(d2) - 1e-3f, sh);
                 // 光源→散射点 的体积透射(Beer)
                 float volT = 1.0f;
-                if (w.volume.active() && w.volume.box.hit({sp, wl}, 1e-3f, std::sqrt(d2)) && w.volume.density > 0)
-                    volT = std::exp(-w.volume.density * std::sqrt(d2) * 0.9f);   // 近似: 0.9 因子抵消双计
+                if (w.volume.active() && w.volume.box.hit({sp, wl}, 1e-3f, std::sqrt(d2)) && w.volume.density > 0) {
+                    if (!w.volume.heterogeneous)
+                        volT = std::exp(-w.volume.density * std::sqrt(d2) * 0.9f);
+                    else {                       // 异质: 步进积分透射
+                        const int TS = 12; float ts = std::sqrt(d2) / TS; float tr = 1;
+                        for (int i = 0; i < TS; i++)
+                            tr *= std::exp(-w.volume.densityAt(sp + wl * (i + 0.5f) * ts) * ts);
+                        volT = tr;
+                    }
+                }
                 float phase = 1 / (4 * float(M_PI));
                 if (!blocked)
                     rad += tp * att * w.volume.albedo * (phase * w.lightMat->emit.x * volT / d2)
@@ -593,6 +646,7 @@ int main(int argc, char** argv) {
 
     bool mltMode = argc > 4 && std::strcmp(argv[4], "--mlt") == 0;
     bool volMode = argc > 4 && std::strcmp(argv[4], "--vol") == 0;
+    bool volHet = argc > 4 && std::strcmp(argv[4], "--vol-het") == 0;
     static Material glass{Material::Dielectric, {1,1,1}};
     Material white{Material::Lambert, {0.86f,0.86f,0.86f}},
              red{Material::Lambert, {0.70f,0.12f,0.10f}},
@@ -657,7 +711,8 @@ int main(int argc, char** argv) {
     fflush(stdout); printf("glTF 往返: %zu 索引 / %zu 顶点\n", g.idx.size(), g.pos.size());
     w.tris = gltfToTriangles(g, &knot, 1.0f, Vec3{0, 0, 0});
     w.lightMat = &light;
-    if (volMode) w.volume = {Aabb{}, 0.8f, Vec3{0.75f, 0.85f, 1.0f}};   // 雾: σt=0.35, 冷色反照率
+    if (volMode) w.volume = {Aabb{}, 0.8f, Vec3{0.75f, 0.85f, 1.0f}};
+    if (volHet) { w.volume = {Aabb{}, 0.8f, Vec3{0.75f, 0.85f, 1.0f}}; w.volume.heterogeneous = true; }   // 雾: σt=0.35, 冷色反照率
     if (volMode) w.volume.box.grow(Vec3{0.02f, 0.0f, 0.02f}), w.volume.box.grow(Vec3{0.98f, 0.9f, 0.98f});
     for (auto& r : w.rects) if (r.m == &light) w.lightRect = r;
 
