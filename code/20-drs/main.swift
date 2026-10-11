@@ -3,35 +3,47 @@
 // 构建: ./build.sh    运行: ./drs
 
 import AppKit
+import Foundation
 import MetalKit
 import QuartzCore
 import simd
 
 let BASE_W = 900, BASE_H = 600
 
-/// DRS 控制器(纯逻辑, 可注入合成帧时间做 headless 断言)
-/// EMA 平滑 → 超预算降档(立即) → 低于预算持续 N 帧才升档(滞回, 防抖动)
+/// DRS 控制器(纯逻辑, 可注入合成帧时间/热状态做 headless 断言)
+/// v2: 热降级三档(戴森化预算)——thermal 上调预算同时压 scale 上限
 struct DRSController {
     var scale: Float = 1.0
     var smoothedMs: Float = 0
     var lowStreak = 0
+    var thermalLevel = 0                     // 0 正常 / 1 轻 / 2 重(降级)
     let budgetMs: Float
     init(budgetMs: Float = 16.6) { self.budgetMs = budgetMs }
 
+    var maxScale: Float { thermalLevel >= 2 ? 0.7 : thermalLevel == 1 ? 0.85 : 1.0 }
+    var effBudget: Float { thermalLevel >= 2 ? budgetMs * 0.8 : budgetMs }
+
+    /// headless 注入口: thermal 直接给等级; 真机读 ProcessInfo.thermalState 映射
+    mutating func setThermal(_ level: Int) {
+        guard level != thermalLevel else { return }
+        thermalLevel = level
+        if scale > maxScale { scale = maxScale; lowStreak = 0 }
+    }
+
     mutating func update(frameMs: Float) {
         smoothedMs = smoothedMs == 0 ? frameMs : smoothedMs * 0.9 + frameMs * 0.1
-        if smoothedMs > budgetMs * 1.15 {
+        if smoothedMs > effBudget * 1.15 {
             let old = scale
             scale = max(0.5, scale - 0.1)
             lowStreak = 0
-            if scale != old { print(String(format: "DRS ↓ scale=%.1f (平滑帧时 %.1fms)", scale, smoothedMs)) }
-        } else if smoothedMs < budgetMs * 0.65 {
+            if scale != old { print(String(format: "DRS ↓ scale=%.1f (平滑 %.1fms, 热%d)", scale, smoothedMs, thermalLevel)) }
+        } else if smoothedMs < effBudget * 0.65 {
             lowStreak += 1
-            if lowStreak > 25 {
+            if lowStreak > 25 && scale < maxScale {
                 let old = scale
-                scale = min(1.0, scale + 0.1)
+                scale = min(maxScale, scale + 0.1)
                 lowStreak = 0
-                if scale != old { print(String(format: "DRS ↑ scale=%.1f", scale)) }
+                if scale != old { print(String(format: "DRS ↑ scale=%.1f (上限热%d)", scale, thermalLevel)) }
             }
         } else {
             lowStreak = 0
@@ -101,6 +113,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     var drs = DRSController()
     var heavyLoad = false
     var lastT: Float = 0
+    var drsFrame = 0
     // 低分辨率 RT 池(按档位)
     var rtCache: [Int: MTLTexture] = [:]
     // headless
@@ -190,6 +203,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         lastT = now
         drs.update(frameMs: frameMs)
         injectFrameMs = nil
+        drsFrame += 1
+        if drsFrame % 60 == 0 {                      // 热状态感知(docs/07 §8.3: 烤机降级)
+            let state = ProcessInfo.processInfo.thermalState
+            drs.setThermal(state == .critical ? 2 : state == .serious ? 1 : 0)
+        }
 
         let t = now
         let lowColor = lowResTarget(device)

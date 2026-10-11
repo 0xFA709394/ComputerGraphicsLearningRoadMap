@@ -26,6 +26,12 @@ docs/27 案例 C 的最后一个缺口骨架，对应 docs/07 §8.3 动态画质
 
 验证脚本生成 Swift 单测时用嵌套 heredoc（外层 `<<'EOF'` 内层 `<<'SWIFT'`），给内层补 `import Foundation` 的 sed 因引号差异（`<<SWIFT` 匹配不上 `<<'SWIFT'`）**静默失败**，`exit`/`String(format:)` 找不到符号。教训：**生成代码的脚本也要断言生成物**；heredoc 定界符的引号差异是 shell 元坑。
 
+## v2 · 热降级三档（练习 3 落地，案例 C 深水区）
+
+控制器升级为**热感知**：`setThermal(level)`（0 正常 / 1 轻 / 2 重）——热态**上调预算收紧**（重热 ×0.8）同时**压 scale 上限**（1.0→0.85→0.7）。真机每 60 帧读 `ProcessInfo.thermalState` 映射；headless 直接注入等级。
+
+**单测四断言全过**：基线 1.0 ✓ / 热压到 0.7 ✓ / 热态轻载不越限 ✓（200 帧轻载也爬不回 1.0）/ 热解除恢复 1.0 ✓。这是"帧率-画质-功耗三角"（docs/07 §8.3）里功耗角的实现。
+
 ## 练习路线（对照 docs/27 案例 C）
 
 1. 接 MetalFX：`MTLFXTemporalScaler` 替换 bilinear（需要历史颜色 + 运动矢量 + 深度，13 号 TAA 的速度缓冲知识直接复用）
