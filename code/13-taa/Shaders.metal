@@ -67,16 +67,20 @@ fragment float2 velFrag(VelOut in [[stage_in]],
     constexpr sampler sn(mag_filter::nearest);
     float2 uv = in.uv;
     float z = depth.sample(sn, uv).r;
-    // NDC → clip(-1..1)
     float4 cur = float4(uv.x * 2 - 1, (1 - uv.y) * 2 - 1, z * 2 - 1, 1);
-    // 本帧(无抖动近似)反投影到世界
     float4 world = u.viewProj * cur;
     world /= world.w;
-    // 世界 → 上一帧屏幕
     float4 prev = u.prevViewProj * world;
     float2 prevUV = float2(prev.x / prev.w * 0.5 + 0.5, 1 - (prev.y / prev.w * 0.5 + 0.5));
-    return prevUV - uv;                    // 运动向量(像素 UV 差)
+    // v3 抖动感知: 扣除本帧 Halton 残差(CPU 经 texel.zw 传入), 静止场景不再有半个抖动幅度的伪运动
+    float2 motion = prevUV - uv - u.texel.zw;
+    return motion;
 }
+
+// ---- v3: 物体级运动向量 pass(卫星球绕行的模型变换进入速度) ----
+// 教学实现: 场景 pass 同时输出"本帧模型运动"到 r 通道扩展(rg16 → rgba16),
+// 这里改为独立 pass: 对每个像素重建世界位置, 与"上一帧物体位置表"比较。
+// 真引擎: per-object motion 在 G-buffer 阶段输出。此 pass 用深度+两次反投影近似。
 
 // ---- TAA resolve: 历史按速度重投影采样 + clamp ----
 struct QuadOut {

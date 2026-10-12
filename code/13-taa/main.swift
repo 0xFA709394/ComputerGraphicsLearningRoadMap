@@ -225,7 +225,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let vp = ndcOffsetMat(jx, jy) * vpNoJitter
         var u = Uniforms(viewProj: vp, prevViewProj: prevVP ?? vpNoJitter, camPos: SIMD4(eye, 1),
                          misc: SIMD4(t, taaOn ? 1 : 0, resetHistory ? 1 : 0.1, 0),
-                         texel: SIMD4(1 / Float(W), 1 / Float(H), 0, 0))
+                         texel: SIMD4(1 / Float(W), 1 / Float(H), jx, jy))   // v3: zw=本帧抖动(速度扣除)
 
         // 场景: 中央球 + 卫星球(绕行, 考验历史拒绝) + 条纹地面
         let sat = SIMD3<Float>(cos(t * 0.7) * 2.6, 0.5, sin(t * 0.7) * 2.6)
