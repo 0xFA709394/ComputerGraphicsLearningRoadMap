@@ -1,11 +1,24 @@
-# 可复现验证的 CI 化: C++ 产物断言 + 控制器单测(Metal 构建需 Metal Toolchain
-# 独立组件下载, 在无人环境不可控, 本地用 ./tools/verify-all.sh 全量跑)
+# 可复现验证 CI:
+#   - metal-headless: 控制器单测(纯逻辑, 必过) + radix metallib 直驱(需 Metal 工具链下载,
+#     无人环境可能失败 → continue-on-error, 已知问题登记于 tools/README)
+#   - 全量验证(含 Metal 构建)在本地跑: ./tools/verify-all.sh
 name: verify
 on: [push, pull_request]
 jobs:
-  verify:
+  logic:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: 可无人值守验证(C++/逻辑)
-        run: ./tools/verify-all.sh --skip-metal
+      - name: 纯逻辑 + 计算验证
+        run: ./tools/verify-metal-headless.sh
+  cpp:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: C++ 示例产物断言
+        run: |
+          (cd code/09-software-rasterizer && ./build.sh >/dev/null && ./rasterizer)
+          python3 tools/tga_stats.py code/09-software-rasterizer/out.tga --min-lit 40
+          (cd code/10-path-tracer && ./build.sh >/dev/null && ./pathtracer 200 150 32)
+          python3 tools/tga_stats.py code/10-path-tracer/out.tga --min-lit 20
+          (cd code/18-bvh-pathtracer && ./build.sh >/dev/null && ./bvhpt 160 120 16)
