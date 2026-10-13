@@ -85,6 +85,8 @@ vertex VOut splatVert(uint vid [[vertex_id]],
     float sxx = dot(m0,m0), sxy = dot(m0,m1), sxz = dot(m0,m2);
     float syy = dot(m1,m1), syz = dot(m1,m2), szz = dot(m2,m2);
     // 2) 投影雅可比 J(视空间→NDC, 小角近似: 只取 x/y 缩放与透视除数)
+    // 注: 完整 J 含相机朝向的 pitch/roll 项(把 Σ 变换到相机轴), 数学见 README 进阶 1——
+    // 本例相机恒看原点, 简化形式已正确; 相机自由旋转时才需要升级。
     float3 pv = s.pos.xyz - u.camPos.xyz;
     float z = max(dot(pv, normalize(float3(-u.camPos.x, -u.camPos.y, -u.camPos.z))), 0.2);
     float f = u.misc.w * 0.5;                       // 焦距(像素)
