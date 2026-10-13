@@ -401,3 +401,11 @@
 > macOS 26 适配注记：① Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），各 build.sh 已做 CLT→Xcode 自动回退；② 本机工具链 `MTKMesh` 顶点转换输出全零（03/04/05/07/11 已改过程化球体，排障实录见 11 的 README）；③ 混合属性改名 `*BlendFactor`、`newTextureView` 改 descriptor 形式。
 
 > 构建环境注：Xcode 26 起 Metal 编译器为独立组件（`xcodebuild -downloadComponent MetalToolchain`），且新 SDK 将混合状态属性改名 `*BlendFactor`；各示例 build.sh 已做 CLT→Xcode 自动回退。
+
+---
+
+## 封版
+
+> **v1.0 · 2026-10** — 21 示例 · 27 章文档 · tools 验证套件 + CI · 38+ 条踩坑实录（含 1 桩完整破案悬案）· 四进阶方向骨架全齐。
+> 验证：`./tools/verify-all.sh` 全绿。体系设计原则：**每个概念有代码、每段代码有验证、每次翻车有档案**。
+> 献给每一位从 App 走向像素的工程师。—— 脚手架至此完成，路在你脚下。
