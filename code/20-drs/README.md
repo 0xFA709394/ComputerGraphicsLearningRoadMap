@@ -32,9 +32,15 @@ docs/27 案例 C 的最后一个缺口骨架，对应 docs/07 §8.3 动态画质
 
 **单测四断言全过**：基线 1.0 ✓ / 热压到 0.7 ✓ / 热态轻载不越限 ✓（200 帧轻载也爬不回 1.0）/ 热解除恢复 1.0 ✓。这是"帧率-画质-功耗三角"（docs/07 §8.3）里功耗角的实现。
 
+## v3 · MetalFX 接入点（案例 C 第 3~4 周的真机落点）
+
+`main.swift` 内嵌**逐行接入骨架**（注释态，真机 `-DFX_ENABLE_METALFX` 一键激活）：MTLFXTemporalScaler 的三输入（低分辨率颜色/深度/运动向量）与 13 号 TAA 的速度 pass 直接复用；特性检测（apple7+）；随 DRS 档位重建的尺寸参数；**TAA 与 MetalFX 二选一**的架构纪律（双重时序累积 = 双重模糊）。
+
+本机无 MetalFX 授权验证 → 交付即"drop-in 点精确到行 + 降级路径已验证"（bilinear 占位全绿），真机编译即活。
+
 ## 练习路线（对照 docs/27 案例 C）
 
-1. 接 MetalFX：`MTLFXTemporalScaler` 替换 bilinear（需要历史颜色 + 运动矢量 + 深度，13 号 TAA 的速度缓冲知识直接复用）
+1. ~~接 MetalFX~~ **接入点已成文（v3 注释骨架）**；真机激活 + 锐度对比视频
 2. 帧时间改 GPU 计数（`MTLCounter` / GPUStartTime——墙钟含 vsync 等待，会低估）
 3. thermalState 三档画质联动（热 → 预算收紧/上限压低）
 4. 档位粒度 0.1 → 连续 scale + 时间滤波（ProMotion 时代的做法）

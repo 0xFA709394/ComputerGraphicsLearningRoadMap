@@ -109,6 +109,30 @@ final class Renderer: NSObject, MTKViewDelegate {
     let groundVB: MTLBuffer
     let groundCount: Int
     let scenePSO, upPSO: MTLRenderPipelineState
+    // ---- MetalFX 接入点(案例 C 第 3~4 周) ----
+    // 真机启用: Build Settings 加 -DFX_ENABLE_METALFX 后此段编译生效。
+    // MTLFXTemporalScaler 需要三输入: 低分辨率颜色(已有) + 深度(已有) + 运动向量
+    // (运动向量 = 13 号 v2 的速度 pass——深度反投影, 直接复用其 velVert/velFrag)。
+    // 特性检测: device.supportsFamily(.apple7) && MetalFX 框架存在。
+    // #if canImport(MetalFX)
+    //     import MetalFX
+    //     var fxScaler: MTLFXTemporalScaler?
+    //     if device.supportsFamily(.apple7) {
+    //         let desc = MTLFXTemporalScalerDescriptor()
+    //         desc.inputWidth = Int(Float(BASE_W) * drs.scale)   // 随档位重建
+    //         desc.inputHeight = Int(Float(BASE_H) * drs.scale)
+    //         desc.outputWidth = BASE_W; desc.outputHeight = BASE_H
+    //         desc.inputContentWidth = BASE_W; desc.inputContentHeight = BASE_H
+    //         desc.motionVectorScaleX = Float(BASE_W); desc.motionVectorScaleY = Float(BASE_H)
+    //         desc.isAutoExposureEnabled = true
+    //         fxScaler = desc.makeTemporalScaler(device: device)
+    //     }
+    //     // 渲染循环中: enc.setRenderPipelineState(fxScaler.renderPipelineState)
+    //     //   fxScaler.colorTexture = lowColor; .depthTexture; .motionTexture
+    //     //   fxScaler.outputTexture = drawable; encode(to: enc)
+    //     // 注意: TAA 与 MetalFX 二选一(都在做时序累积, 叠加会双重模糊)——
+    //     // 13 号的知识在此汇合: 选 MetalFX 时把 13 的 resolve 剪掉, 只留抖动+速度。
+    // #endif
     let depthState: MTLDepthStencilState
     var drs = DRSController()
     var heavyLoad = false
