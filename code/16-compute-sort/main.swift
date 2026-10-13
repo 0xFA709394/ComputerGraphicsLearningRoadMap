@@ -162,6 +162,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
             enc.setComputePipelineState(scanPSO)
             enc.setBuffer(histBuf, offset: 0, index: 0)
+            enc.setBuffer(cursorBuf, offset: 0, index: 1)   // v2 修复: 游标=前缀和副本(GPU 侧初始化)
             enc.setThreadgroupMemoryLength(64, index: 0)
             enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
                                      threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))

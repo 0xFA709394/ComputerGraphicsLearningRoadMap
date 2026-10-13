@@ -31,6 +31,7 @@ kernel void radixHist(device const ulong *keys [[buffer(0)]],
     atomic_fetch_add_explicit(&hist[digit], 1, memory_order_relaxed);
 }
 kernel void radixScan(device uint *hist [[buffer(0)]],      // 16 bin: 就地前缀和(含 0)
+                      device atomic_uint *cursor [[buffer(1)]],   // v2: 游标 = 前缀和副本(GPU 内拷, 时序正确)
                       threadgroup uint *tg [[threadgroup(0)]],
                       uint ti [[thread_position_in_threadgroup]]) {
     if (ti < 16) tg[ti] = hist[ti];
@@ -40,7 +41,10 @@ kernel void radixScan(device uint *hist [[buffer(0)]],      // 16 bin: 就地前
         for (int i = 0; i < 16; i++) { uint v = tg[i]; tg[i] = sum; sum += v; }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (ti < 16) hist[ti] = tg[ti];
+    if (ti < 16) {
+        hist[ti] = tg[ti];
+        atomic_store_explicit(&cursor[ti], tg[ti], memory_order_relaxed);   // 游标初始化(GPU 侧)
+    }
 }
 kernel void radixScatter(device const ulong *keysIn [[buffer(0)]],
                          device ulong *keysOut [[buffer(1)]],
