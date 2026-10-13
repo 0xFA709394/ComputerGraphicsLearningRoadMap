@@ -53,6 +53,7 @@ struct Uniforms {
     float4x4 viewProj;
     float4 camPos;
     float4 misc;        // x: time, y: N, z: sortedOn, w: viewportH
+    float4x4 placement; // AR 摆放姿态(案例 D 第 9~10 周: 平面检测锚点 + 手势)
 };
 struct VOut {
     float4 pos [[position]];
@@ -65,7 +66,9 @@ vertex VOut splatVert(uint vid [[vertex_id]],
                       device const Splat *sorted [[buffer(0)]],
                       constant Uniforms &u [[buffer(1)]]) {
     Splat s = sorted[iid];
-    float4 clip = u.viewProj * float4(s.pos.xyz, 1);
+    // AR 摆放: placement 把"以原点为中心的 splat 云"搬到检测平面锚点并应用手势变换
+    float4 wp = u.placement * float4(s.pos.xyz, 1);
+    float4 clip = u.viewProj * wp;
     VOut o;
     o.pos = clip;
     // ---- EWA splatting 核心(docs/27 案例 D 练习 1 的落地) ----

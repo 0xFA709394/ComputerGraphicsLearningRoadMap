@@ -19,6 +19,7 @@ struct Uniforms {
     var viewProj: simd_float4x4
     var camPos: SIMD4<Float>
     var misc: SIMD4<Float>         // x: time, y: N, z: sortedOn, w: viewportH
+    var placement: simd_float4x4   // AR 摆放姿态(锚点+手势)
 }
 
 func perspective(fovY: Float, aspect: Float, n: Float, f: Float) -> simd_float4x4 {
@@ -175,6 +176,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     var sortedOn = true
     var offRpd: MTLRenderPassDescriptor?
     var fixedTime: Float?
+    /// AR 摆放姿态(案例 D 第 9~10 周): 桌面模式恒等; AR 模式由 ARSession 锚点 + 手势更新。
+    /// 接线点(真机): ARView/ARSessionDelegate.didUpdate anchors → 这里。
+    var placement = simd_float4x4(diagonal: SIMD4(1,1,1,1))
 
     init?(view: MTKView) {
         guard let device = view.device,
@@ -231,7 +235,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             viewProj: perspective(fovY: 50 * .pi / 180, aspect: aspect, n: 0.1, f: 100)
                 * lookAt(eye: eye, target: SIMD3(0, -0.2, 0), up: SIMD3(0, 1, 0)),
             camPos: SIMD4(eye, 1),
-            misc: SIMD4(t, Float(N_SPLATS), sortedOn ? 1 : 0, 300))
+            misc: SIMD4(t, Float(N_SPLATS), sortedOn ? 1 : 0, 300),
+            placement: placement)
 
         let tg = MTLSize(width: 256, height: 1, depth: 1)
         let groups = MTLSize(width: N_SPLATS / 256, height: 1, depth: 1)
@@ -290,6 +295,19 @@ final class KeyMTKView: MTKView {
     override var acceptsFirstResponder: Bool { true }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 49 { (delegate as? Renderer)?.sortedOn.toggle() }
+    }
+    // 桌面模式的手势等价物: 拖动=平移 placement, 滚轮=缩放(与 AR 手势同一条变换链)
+    override func scrollWheel(with event: NSEvent) {
+        guard let r = delegate as? Renderer else { return }
+        let s = Float(event.scrollingDeltaY) * 0.002
+        var sc = simd_float4x4(diagonal: SIMD4(1 + s, 1 + s, 1 + s, 1))
+        r.placement = simd_mul(r.placement, sc)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let r = delegate as? Renderer else { return }
+        var tr = simd_float4x4(diagonal: SIMD4(1,1,1,1))
+        tr.columns.3 = SIMD4(Float(event.deltaX) * 0.01, Float(event.deltaY) * 0.01, 0, 1)
+        r.placement = simd_mul(tr, r.placement)
     }
 }
 

@@ -9,6 +9,14 @@ docs/22（3DGS 实操）第 1~2 周的参考实现，docs/27 案例 D 的 MVD �
 ./splat      # 空格: 开关排序; scene.ply 由程序生成
 ```
 
+## v3 · AR 摆放变换链（案例 D 第 9~10 周接线骨架）
+
+`placement` 矩阵贯通渲染管线（Uniforms → 顶点着色器 `placement × pos`）：AR 模式下由 ARSession 锚点（平面检测）+ 手势（捏合缩放/旋转/拖动）更新，桌面模式用**等价手势**（滚轮缩放、拖动平移）驱动同一条变换链——代码路径单一，真机只换数据来源。
+
+**headless 验证**：placement 恒等回归（132k 非背景像素）→ 平移后像素分布显著变化（placement 生效实锤）。
+
+**真机接线点**（三处，本机无法验证相机故留真机）：`ARSessionDelegate.session(_:didUpdate:)` 锚点 → `renderer.placement`；`MTKView` 背景换 `CAMetalLayer` + 相机 feed；`UIGestureRecognizer` → 同一 placement。docs/22 §AR 有完整真机路线。
+
 ## v2 · EWA splatting 升级（各向异性真高斯）
 
 练习清单第 1 项已落地——从圆形 splat 升级为**真各向异性高斯**：
