@@ -56,7 +56,7 @@
 
 **定位**：把 10 号路径追踪器升级为**双向 + MLT + 体渲染**的物理正确渲染器，对标 Mitsuba 2 的教学定位。面试一句话："我的离线渲染器实现了 BDPT+MIS 和单向 MLT，渲染了 XXX 场景并和 Mitsuba 参考图做了 RMSD 对比。"
 
-> **✅ 骨架已完成（code/18，v1~v6 六代演进）**：BVH(SAH, 358~487×) → glTF 资产链(61440 索引往返) → BDPT+MIS(幂次启发式) → 单向 MLT+焦散 → PFM+RMSD 定量对比(32vs1024spp=0.0999) → 同质介质体渲染(蓝偏 7%→92%)。剩余：异质密度噪声场、跨渲染器对比——路线见 code/18 README 练习清单。
+> **✅ 骨架已完成（code/18，v1~v7 七代演进）**：BVH(SAH, 358~487×) → glTF 资产链(61440 索引往返) → BDPT+MIS(幂次启发式) → 单向 MLT+焦散 → PFM+RMSD(32vs1024spp=0.0999) → 同质介质体渲染 → **异质密度场(云絮)**。剩余：跨渲染器对比、δ-tracking 精确版——路线见 code/18 README 练习清单。
 
 **技术分解**（在 10 号上生长）：
 
@@ -76,8 +76,8 @@
 | 3~4 | 三角形网格 + 法线插值 + obj/glTF 输入 | Cornell Box 加_mesh 变体 |
 | 5~7 | **BDPT**：双向路径生成 + MIS 权重（docs/06 §MIS 落地） | 同 spp 下噪声对比图（BDPT vs NEE） |
 | 8~9 | 单向 MLT：变异策略 + 复用链 | 焦散场景（pool、glass caustics） |
-| 10~11 | 体渲染：homogeneous 参与介质 → 单散射 | 体积光柱图 |
-| 12 | OpenEXR 输出 + 与 Mitsuba 参考的 RMSD 脚本 | **误差数字**（物理正确的证明） |
+| 10~11 | ✅ 体渲染：homogeneous 单散射（v6，蓝偏 7%→92%）+ **异质密度场（v7，3-octave 云絮）** | 体积光柱图 |
+| 12 | ✅ PFM 输出 + RMSD compare（v5，32vs1024spp=0.0999）；进阶：OpenEXR 库 + 跨渲染器对比 | 误差数字 |
 | 13~14 | 文档：设计文档 + 每个估计器的推导笔记 | GitHub README（学术味） |
 
 **MVD**：周 1~7（BVH + 网格 + BDPT/MIS）已超越绝大多数求职作品。
@@ -137,7 +137,7 @@
 
 | 周 | 内容 | 验收物 |
 |---|---|---|
-| 1~2 | docs/22 的 viewer 强化：instanced quad + 05 号的 PBR 混合 shading | 10 万 splat 60fps |
+| 1~2 | ✅ viewer：instanced quad + **EWA 各向异性投影(v2)** | 3.2 万 splat 实时 |
 | 3~4 | compute 深度排序（08 号的粒子 compute 直接改造：位置→key 归约排序） | 旋转无闪烁 |
 | 5~6 | 量化压缩：SH 系数降阶 + half + 分块 LOD | 内存减 60% 数据 |
 | 7~8 | EDR 高光 + 简单曝光控制（09 章） | 高亮场景不发灰 |
