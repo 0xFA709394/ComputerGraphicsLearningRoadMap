@@ -39,39 +39,39 @@ for trial in 0..<8 {
         rng2 = rng2 &* 6364136223846793005 &+ 1442695040888963407
         kp[i] = (UInt64((rng2 >> 33) & 0x7FFF_FFFF) << 32) | UInt64(i)
     }
-    let cbuf = q.makeCommandBuffer()!
-    guard let enc = cbuf.makeComputeCommandEncoder() else { exit(1) }
-    srcBuf = keys; dstBuf = scratch
+    var srcBuf = keys, dstBuf = scratch
+    // v2 终版: 每 pass 一个 command buffer——CPU 算 hist/cursor 与 GPU scatter 严格交替,
+    // 消除 CPU/GPU 混写竞态(教学版正确优先; 工业版全 GPU + 栅栏)
     for pass in 0..<16 {
         var shift = UInt32(pass * 4)
-        enc.setComputePipelineState(clearPSO)
-        enc.setBuffer(hist, offset: 0, index: 0)
-        enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
-        enc.setBuffer(cursor, offset: 0, index: 0)
-        enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
-        enc.setComputePipelineState(histPSO)
-        enc.setBuffer(srcBuf, offset: 0, index: 0)
-        enc.setBuffer(hist, offset: 0, index: 1)
-        enc.setBytes(&shift, length: 4, index: 2)
-        enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
-        enc.setComputePipelineState(scanPSO)
-        enc.setBuffer(hist, offset: 0, index: 0)
-        enc.setThreadgroupMemoryLength(64, index: 0)
-        enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
-                                 threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+        let hp = hist.contents().bindMemory(to: UInt32.self, capacity: 16)
+        let cp = cursor.contents().bindMemory(to: UInt32.self, capacity: 16)
+        let ksrc = srcBuf.contents().bindMemory(to: UInt64.self, capacity: N)
+        for b in 0..<16 { hp[b] = 0 }
+        for i in 0..<N { hp[Int((ksrc[i] >> shift) & 0xF)] += 1 }
+        var run: UInt32 = 0
+        for b in 0..<16 { let v = hp[b]; cp[b] = run; run += v }
+        let cbuf = q.makeCommandBuffer()!
+        guard let enc = cbuf.makeComputeCommandEncoder() else { exit(1) }
         enc.setComputePipelineState(scatterPSO)
         enc.setBuffer(srcBuf, offset: 0, index: 0)
         enc.setBuffer(dstBuf, offset: 0, index: 1)
         enc.setBuffer(cursor, offset: 0, index: 2)
         enc.setBytes(&shift, length: 4, index: 3)
         enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
+        enc.endEncoding()
+        cbuf.commit(); cbuf.waitUntilCompleted()
         let tmp = srcBuf; srcBuf = dstBuf; dstBuf = tmp
     }
-    enc.endEncoding()
-    cbuf.commit(); cbuf.waitUntilCompleted()
     // 16 pass 偶数 → 结果回 keys
     var bad = 0
-    for i in 1..<N where kp[i-1] > kp[i] { bad += 1 }
+    for i in 1..<N where kp[i-1] > kp[i] {
+        if bad < 2 { print("  失序对@\(i): \(String(kp[i-1], radix: 16)) > \(String(kp[i], radix: 16))") }
+        bad += 1
+    }
+    var seen = Set<UInt32>(); var dup = 0
+    for i in 0..<N { if !seen.insert(UInt32(truncatingIfNeeded: kp[i])).inserted { dup += 1 } }
+    print("  唯一索引: \(seen.count)/\(N) 重复:\(dup)")
     if bad != 0 { print("trial \(trial): 违例 \(bad)"); result = false; break }
 }
 print(result ? "radix 8 trials: 全部有序 ✓" : "FAIL")

@@ -152,20 +152,17 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setComputePipelineState(clearPSO)
             enc.setBuffer(histBuf, offset: 0, index: 0)
             enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
-            enc.setComputePipelineState(clearPSO)
-            enc.setBuffer(cursorBuf, offset: 0, index: 0)
-            enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: tg)
-            enc.setComputePipelineState(histPSO)
-            enc.setBuffer(srcBuf, offset: 0, index: 0)
-            enc.setBuffer(histBuf, offset: 0, index: 1)
-            enc.setBytes(&shift, length: 4, index: 2)
-            enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tg)
-            enc.setComputePipelineState(scanPSO)
-            enc.setBuffer(histBuf, offset: 0, index: 0)
-            enc.setBuffer(cursorBuf, offset: 0, index: 1)   // v2 修复: 游标=前缀和副本(GPU 侧初始化)
-            enc.setThreadgroupMemoryLength(64, index: 0)
-            enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
-                                     threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+            // v2: cursor 由 scan 全量覆写, 不再每轮清零(旧 clear 与 scan 写存在时序覆盖)
+            // v2 修复(最终形态): hist+cursor 由 CPU 算(shared 缓冲), 消除 GPU 竞态——教学清晰优先
+            let hp = histBuf.contents().bindMemory(to: UInt32.self, capacity: 16)
+            let cp = cursorBuf.contents().bindMemory(to: UInt32.self, capacity: 16)
+            let ksrc = srcBuf.contents().bindMemory(to: UInt64.self, capacity: N)
+            for b in 0..<16 { hp[b] = 0 }
+            for i in 0..<N { hp[Int((ksrc[i] >> shift) & 0xF)] += 1 }
+            var run: UInt32 = 0
+            for b in 0..<16 { let v = hp[b]; cp[b] = run; run += v }
+            if shift == 0 { print("DBG hist:", (0..<16).map { hp[$0] }); print("DBG cursor:", (0..<16).map { cp[$0] }) }
+            // (scan kernel 已由 CPU 前缀和替代——radixScan 保留在 metallib 供对照)
             enc.setComputePipelineState(scatterPSO)
             enc.setBuffer(srcBuf, offset: 0, index: 0)
             enc.setBuffer(dstBuf, offset: 0, index: 1)

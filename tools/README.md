@@ -19,7 +19,7 @@
 
 ## 已知问题登记（验证器抓出来的）
 
-- **code/16 的 radixScatter 覆盖丢失**（driver16base.swift 抓出）：独立驱动下排序后大量槽位互相覆盖（16 元小例覆盖 4/16）——散射游标的初始化/同步存在缺陷（已试：GPU 侧游标初始化绑定，未愈）。**根因候选清单**：① clear→hist 无栅栏竞态；② scan 的前缀和未含"本轮 hist"的时序；③ 散射与 scan 的 buffer 别名。修复方向：改双缓冲分段散射或参考工业实现（案例 D 第 11~12 周）。示例自带的 SIMD4 路径（16 号 GUI）未暴露此问题——**两条测试路径的又一实证**。
+- **code/16 的 radixScatter（独立驱动版）**：直驱下高 32 位键在 pass0 后丢失（sceneRT 式的定量复现：pass0 后 digit 全 0）。已试并排除：GPU 游标初始化、clear 竞态、CPU/GPU 混写（per-pass 拆分 commit）、每 pass 交换缓冲——**高 32 位仍在散射中丢失**，嫌疑收敛到 kernel 与 shared 缓冲的交互，需 GPU 帧捕获。**修复方向**：工业版全 GPU 实现（threadgroup 聚合直方图，案例 D 第 11~12 周）会整体绕开此形态。示例 GUI 的 bitonic 路径不受影响（独立的已验证实现）。
 - 教训：示例内嵌验证（SIMD4 路径）与独立驱动（metallib 直驱）是**两条不同的测试路径**——都过才算过。
 
 ## Metal GUI 示例的验证边界
