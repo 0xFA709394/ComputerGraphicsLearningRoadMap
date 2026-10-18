@@ -31,3 +31,7 @@
 2. blur 迭代两轮（H→V→H→V）或改 dual-Kawase——观感/性能对比
 3. 亮部阈值/knee 参数化（`constant float2 &params`），做成"滑杆调试"的第一步
 4. 合成 pass 加 vignette + film grain（docs/17 §10），构成完整风格化链
+
+## 体系位置
+
+后继：`code/07`——离屏 pass 的组织在 07 号变成双 pass 阴影映射, 在 14 号交给帧图。前置与全部路线见 README 体系地图。

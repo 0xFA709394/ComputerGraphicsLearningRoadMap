@@ -25,3 +25,7 @@
 2. 加第二个三角形（vertexCount / buffer 两种做法各写一遍）
 3. 加深度缓冲 + `depth32Float`（docs/16 Step 1）
 4. 逐步升级到 MVP uniform → OBJ 加载 → PBR（docs/16 Step 2–5）
+
+## 体系位置
+
+后继：`code/02`——管线全对象(PSO/缓冲/编码器)在 02 号扩展为完整的 MVP 立方体。前置与全部路线见 README 体系地图。

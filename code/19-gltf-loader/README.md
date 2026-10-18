@@ -30,3 +30,7 @@ docs/10 §资产管线（glTF/OBJ/USD）此前无代码——本例补上。docs
 3. KHR_materials_pbrSpecularGlossiness + baseColorTexture（贴图接入 04 号知识）
 4. 接进 14 号帧图：glTF 节点 → frame graph 的 opaque pass
 5. Draco/meshopt 压缩扩展（工业级加载器的分水岭）
+
+## 体系位置
+
+后继：`code/14`——glTF 加载进帧图(14 号)的 opaque pass 即案例 A 的主体。前置与全部路线见 README 体系地图。
