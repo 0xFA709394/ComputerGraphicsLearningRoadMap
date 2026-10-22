@@ -22,6 +22,16 @@
 - **code/16 的 radixScatter（独立驱动版）**：直驱下高 32 位键在 pass0 后丢失（sceneRT 式的定量复现：pass0 后 digit 全 0）。已试并排除：GPU 游标初始化、clear 竞态、CPU/GPU 混写（per-pass 拆分 commit）、每 pass 交换缓冲——**高 32 位仍在散射中丢失**，嫌疑收敛到 kernel 与 shared 缓冲的交互，需 GPU 帧捕获。**修复方向**：工业版全 GPU 实现（threadgroup 聚合直方图，案例 D 第 11~12 周）会整体绕开此形态。示例 GUI 的 bitonic 路径不受影响（独立的已验证实现）。
 - 教训：示例内嵌验证（SIMD4 路径）与独立驱动（metallib 直驱）是**两条不同的测试路径**——都过才算过。
 
+## 全仓巡检清单（七道, 全部通过, 可重跑）
+
+1. Markdown 内部链接完整性（0 断链）
+2. build 产物名 ↔ README 运行说明一致
+3. docs 引用的 code 目录全部存在
+4. MSL 死代码（未被引用的 shader 函数）= 0
+5. 示例 README 叙事衔接段（前驱/后继）齐全
+6. gitignore 覆盖审计（21 个编译产物已移出跟踪）
+7. build.sh 可移植性（无硬编码路径）+ TODO/FIXME 残留 = 0 + 常量漂移检查
+
 ## Metal GUI 示例的验证边界
 
 无人值守环境（CI/SSH）无法运行 GUI。可自动化的部分：
