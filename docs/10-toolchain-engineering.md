@@ -1,5 +1,7 @@
 # 10 · 工具链与工程实践
 
+> 参考实现：[code/19-gltf-loader](../code/19-gltf-loader/)（glTF 2.0 资产管线往返）· [code/14-frame-graph](../code/14-frame-graph/)（帧图与 pass 组织）
+
 > 从"会写 shader"到"能交付渲染器"的距离就在本章。面向资深工程师：调试武器化、资产管线化、渲染器架构化。
 
 ---

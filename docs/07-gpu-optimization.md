@@ -1,6 +1,6 @@
 # 07 · GPU 架构与性能优化
 
-> 参考实现：[code/08-compute-particles](../code/08-compute-particles/)（compute 每粒子一线程 + additive 点精灵）
+> 参考实现：[code/08-compute-particles](../code/08-compute-particles/)（compute 每粒子一线程 + additive 点精灵）· [code/16-compute-sort](../code/16-compute-sort/)（§6 排序落地：bitonic + radix，基准数据在案）
 
 > 资深工程师的价值区：理解硬件行为，让优化从"玄学调参"变成"瓶颈驱动工程"。本章以 Apple Silicon（TBDR）为主线——这是 iOS 开发者的主场优势。
 
