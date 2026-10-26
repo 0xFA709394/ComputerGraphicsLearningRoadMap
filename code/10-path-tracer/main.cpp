@@ -279,6 +279,10 @@ int main(int argc, char** argv) {
     int W2 = argc > 1 ? std::atoi(argv[1]) : 480;
     int H2 = argc > 2 ? std::atoi(argv[2]) : 360;
     int spp = argc > 3 ? std::atoi(argv[3]) : 128;
+    if (W2 <= 0 || H2 <= 0 || spp <= 0) {
+        std::printf("用法: pathtracer [宽 高 spp] (均须为正整数)\n");
+        return 1;
+    }
 
     MaterialStore M;
     World world = buildCornell(M);
