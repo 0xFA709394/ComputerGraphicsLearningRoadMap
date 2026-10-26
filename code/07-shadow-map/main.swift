@@ -3,7 +3,6 @@
 
 import AppKit
 import MetalKit
-import ModelIO
 import QuartzCore
 import simd
 

@@ -4,8 +4,6 @@
 
 import AppKit
 import MetalKit
-import ModelIO
-import QuartzCore
 import simd
 
 struct Light { var pos: SIMD4<Float>; var color: SIMD4<Float> }
