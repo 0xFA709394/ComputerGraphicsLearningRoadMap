@@ -21,3 +21,4 @@ code/*/sdf
 code/*/rasterizer
 code/*/pathtracer
 code/*/bvhpt
+code/*/--bogus
