@@ -22,3 +22,4 @@ code/*/rasterizer
 code/*/pathtracer
 code/*/bvhpt
 code/*/--bogus
+code/out.tga

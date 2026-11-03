@@ -643,8 +643,8 @@ int main(int argc, char** argv) {
     int W = argc > 1 ? std::atoi(argv[1]) : 480;
     int H = argc > 2 ? std::atoi(argv[2]) : 360;
     int spp = argc > 3 ? std::atoi(argv[3]) : 96;
-    if (W <= 0 || H <= 0 || spp <= 0) {
-        std::printf("用法: bvhpt [宽 高 spp] (均须为正整数)\n");
+    if (W <= 0 || H <= 0 || spp <= 0 || W > 16384 || H > 16384) {
+        std::printf("用法: bvhpt [宽 高 spp] (正整数, 宽高 ≤ 16384)\n");
         return 1;
     }
 
